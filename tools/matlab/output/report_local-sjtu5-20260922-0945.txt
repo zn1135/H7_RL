@@ -1,0 +1,59 @@
+==== run_all  表号 local-sjtu5-20260922-0945 ====
+机器 local (MACHINE_ID_LOCAL)   模型 sjtu5   Q/R 组 mlx-2026-07-27   复现模式 1
+Q = diag([16000   1200   1000    870   2500    365   2500    365  10500   2000])
+R = diag([5480  5480   650   650])
+网格 0.13:0.01:0.23 (11 点)   Ts = 0.001   腿数据取行 nearest
+待实测项: leg.data_newton15(待实测 (阶段 2 前作者定))
+scan_grid: local / sjtu5, 11x11 点, dlqr 成功 121/121, 标称 L=0.18 可控秩 10/10, 耗时 2.1 s
+fit_K: poly22, 拟合残差 max|K_fit-K_dlqr| = 0.0256 (相对 0.0155)
+emit_gain_table: 已写 C:\Users\ynz\Desktop\zzzzzzzz\0~0Hal_zzzz\h723(DM_Borad)\CtrBoard-H7_ALL\tools\matlab\output\lqr_gain_table.c (表号 local-sjtu5-20260922-0945)
+
+---- check_closed_loop ----
+闭环谱半径 (拟合 K): 最大 0.998929 @ lL=0.23 lR=0.23  (折算 -1.07 1/s)
+闭环谱半径 (dlqr K): 最大 0.998928 @ lL=0.13 lR=0.13  (折算 -1.07 1/s)
+拟合残差: 最大绝对 0.0256 @ K(4,7), 最大相对 0.0155 @ K(4,1)
+check_closed_loop: 通过
+
+---- check_vs_ref ----
+A/B 对照 (本管线 vs Leg2 AB_WBR_gen, 9 个腿长组合): 最大相对差 0.00e+00
+K 对照 (拟合 K vs ref, 121 网格点): 最大相对差 3.51e-11 (绝对 6.33e-12) @ lL=0.230 lR=0.230
+K 对照 (拟合 K vs ref, 7 非网格/非对称点): 最大相对差 1.32e-11
+K 对照 (dlqr 原始 K vs ref, 网格点): 最大相对差 7.05e-02  (= ref 自身的拟合误差量级)
+标称 lL=lR=0.18, 本管线拟合 K (行 T_wl T_wr T_bl T_br, 列 s..dth_b):
+   -1.1626   -0.9942   -0.2600   -0.2460   -1.4249   -0.1948   -2.3796   -0.3114   -0.9647   -0.1610
+   -1.1626   -0.9942    0.2600    0.2460   -2.3796   -0.3114   -1.4249   -0.1948   -0.9647   -0.1610
+    0.4115    0.3663    0.4071    0.4103    6.8733    0.6574   -4.4073   -0.3469   -3.7209   -1.1565
+    0.4115    0.3663   -0.4071   -0.4103   -4.4073   -0.3469    6.8733    0.6574   -3.7209   -1.1565
+
+同点 ref K:
+   -1.1626   -0.9942   -0.2600   -0.2460   -1.4249   -0.1948   -2.3796   -0.3114   -0.9647   -0.1610
+   -1.1626   -0.9942    0.2600    0.2460   -2.3796   -0.3114   -1.4249   -0.1948   -0.9647   -0.1610
+    0.4115    0.3663    0.4071    0.4103    6.8733    0.6574   -4.4073   -0.3469   -3.7209   -1.1565
+    0.4115    0.3663   -0.4071   -0.4103   -4.4073   -0.3469    6.8733    0.6574   -3.7209   -1.1565
+
+check_vs_ref: 通过 (复现模式, tol 1e-06)
+
+---- check_machine_config ----
+字段                     MATLAB machine_config.c  
+wheel_r                  0.04           0.04  ok
+leg_lu                0.13087        0.13087  ok
+leg_lg                 0.1524         0.1524  ok
+leg_len_min              0.13           0.13  ok
+leg_len_max              0.23           0.23  ok
+dji_trq_clamp             1.8            1.8  ok
+dm_trq_clamp               10             10  ok
+Ts                      0.001          0.001  ok (CTRL_DT)
+K 表域              0.13~0.23      0.13~0.23   ok (LQR_K_LEN_MIN/MAX, 本机器 = MACHINE_DEFAULT)
+check_machine_config: 通过
+
+---- check_c_compile ----
+armcc rc=0  输出: (无输出)
+check_c_compile: 通过 (.o 在 C:\Users\ynz\AppData\Local\Temp\tp7d7d7c0b_24b4_41ac_acb4_3dfbb3cd1746)
+
+---- check_c_vs_board ----
+C vs C: 21x21 点 x 40 元素, 最大相对差 1.573e-08, 最大绝对差 1.881e-08, 最差 @ lL=0.130 lR=0.230 K_sym[16]
+check_c_vs_board: 通过 (复现模式)
+
+==== 结果: closed_loop 1 | vs_ref 1 | machine_config 1 | c_compile 1 | c_vs_board 1  =>  全部通过 ====
+产物: C:\Users\ynz\Desktop\zzzzzzzz\0~0Hal_zzzz\h723(DM_Borad)\CtrBoard-H7_ALL\tools\matlab\output\lqr_gain_table.c
+报告: C:\Users\ynz\Desktop\zzzzzzzz\0~0Hal_zzzz\h723(DM_Borad)\CtrBoard-H7_ALL\tools\matlab\output\report_local-sjtu5-20260922-0945.txt

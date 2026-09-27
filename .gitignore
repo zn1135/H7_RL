@@ -1,0 +1,22 @@
+# dot files
+/.vscode/launch.json
+/.settings
+/.eide/log
+/.eide.usr.ctx.json
+
+# project out
+/build
+/bin
+/obj
+/out
+
+# eide template
+*.ept
+*.eide-template
+
+# sysid 采集数据与导出产物
+/data
+
+# MATLAB 增益表管线缓存 (matlabFunction 生成物、.mat)
+/tools/matlab/cache
+/tools/matlab/*.log

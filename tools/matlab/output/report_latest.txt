@@ -1,0 +1,38 @@
+==== 表号 local-sjtu5-20260924-2009 ====
+机器 local (MACHINE_ID_LOCAL)   模型 sjtu5   拟合 poly22
+Q = diag([16000   1200   1000    870  11000    250  11000    250   7000    500])
+R = diag([5480  5480   650   650])
+网格 0.13:0.01:0.23 (11 点)   Ts = 0.001   腿数据取行 nearest
+待实测项: leg.data_newton15(待实测 (阶段 2 前作者定))
+scan_grid: 11x11 点, dlqr 成功 121/121, 标称 L=0.18 可控秩 10/10, 耗时 0.4 s
+fit_K: poly22, 拟合残差 max|K_fit-K_dlqr| = 0.0259 (相对 0.02)
+闭环谱半径 (拟合 K, 全网格): 最大 0.998928 @ lL=0.23 lR=0.23  (最慢极点折算 -1.07 1/s)
+拟合残差最大绝对 0.0259 @ K(4,7) (相对 0.00313)
+闭环检查: 通过
+标称 lL=lR=0.18 的拟合 K (行 T_wl T_wr T_bl T_br, 列 s ds phi dphi th_ll dth_ll th_lr dth_lr th_b dth_b):
+  列 1 至 4
+
+   -1.1738   -1.0306   -0.2607   -0.2469
+   -1.1738   -1.0306    0.2607    0.2469
+    0.1780    0.1553    0.4035    0.4057
+    0.1780    0.1553   -0.4035   -0.4057
+
+  列 5 至 8
+
+   -1.4452   -0.1909   -2.5429   -0.2926
+   -2.5429   -0.2926   -1.4452   -0.1909
+    7.4974    0.6172   -4.6491   -0.3398
+   -4.6491   -0.3398    7.4974    0.6172
+
+  列 9 至 10
+
+   -0.9293   -0.1206
+   -0.9293   -0.1206
+   -3.3856   -0.6279
+   -3.3856   -0.6279
+
+emit: 已写 C:\Users\ynz\Desktop\zzzzzzzz\0~0Hal_zzzz\h723(DM_Borad)\CtrBoard-H7_ALL\tools\matlab\output\lqr_gain_table.c
+
+==== 闭环检查通过, 已覆盖 C:\Users\ynz\Desktop\zzzzzzzz\0~0Hal_zzzz\h723(DM_Borad)\CtrBoard-H7_ALL\imcalib\Algorithm\lqr_gain_table.c → 整项目编译后上板 ====
+产物: C:\Users\ynz\Desktop\zzzzzzzz\0~0Hal_zzzz\h723(DM_Borad)\CtrBoard-H7_ALL\tools\matlab\output\lqr_gain_table.c
+报告: C:\Users\ynz\Desktop\zzzzzzzz\0~0Hal_zzzz\h723(DM_Borad)\CtrBoard-H7_ALL\tools\matlab\output\report_latest.txt
