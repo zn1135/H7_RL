@@ -1,13 +1,13 @@
 # 整机诊断串口接线、采集与验收
 
-本次接入在 `little-wheelleg` 分支完成（自 `a824da1` 起，变更 104），与现有控制代码**去耦**：`imcalib/Telemetry/` 只读现有状态，任务层只有 `commTask` 里的 `S2R_Pump()` 一个挂点。协议布局见 [sim2real_serial_protocol.md](sim2real_serial_protocol.md)；哪些字段本分支拿不到，以 META 的 `unavailable` / `derived` 两栏为准。
+本次接入在 `little-wheelleg` 分支完成（自 `a824da1` 起，变更 104），与现有控制代码**去耦**：`imcalib/Telemetry/` 只读现有状态，任务层只有 `commTask` 里的 `S2R_Pump()` 一个挂点。协议布局见 [sim2real_serial_protocol.md](sim2real_serial_protocol.md)；哪些字段本分支拿不到，以 META 的 `unavailable` / `derived` 两栏为准。当前上电默认使用 [策略 VOFA](vofa_policy_trace.md)；以下 S2R 步骤仅在显式切换后适用。
 
 ## 1. 接线和准备
 
 - 板端遥测口 TX（`imcalib/user-lib/Vofa_send.h` 按机器表的 `MACHINE_VOFA_PORT` 选口：大机 `1` = **USART1 PA9**，小机 `8` = UART8 PE1）→ USB 转串口 RX，两端 GND 共地。使用与板端电平兼容的 TTL 转换器，不能直接接 RS-232 电平。
 - 本工具只接收，USB 转串口 TX 可不接；板端遥测口 RX（大机 USART1 PA10）不启用。不要连接 DTR/RTS 到复位或使能。
 - 波特率 **1152000、8N1、无流控**。USB 转串口和驱动必须支持该速率；与原 VOFA 程序互斥占用串口。
-- 遥测口上电直接发 S2R1（首拍 `S2R_Pump()` 自初始化，`main.c` 不参与），同口不再发 32 路 VOFA（`commTask` 里两者互斥）。UART7 仍接 IMU，UART9 仍接遥控。无诊断串口启动电机/策略指令。
+- 遥测口上电默认发策略 VOFA。若要使用本页 S2R1 流程，需在失能、无会话且 UART 空闲时把 `s2r_diagnostic_requested` 写 1；同口两种协议互斥。UART7 仍接 IMU，UART9 仍接遥控。无诊断串口启动电机/策略指令。
 
 采集工具不改变任何控制路径；要采集网络策略，按原有流程（左上挡 + 右中位）投入推理。
 
@@ -37,7 +37,7 @@ python tools/s2r_build_info.py --check
 | **2（稳健，台架默认）** | 5 Hz | 5 Hz | 2 Hz | 1 Hz | 0.2 Hz | 20 s | **≈4.3 kB/s** |
 | 3（极低，只验链路） | 2 Hz | 2 Hz | 1 Hz | 0.5 Hz | 0.1 Hz | 60 s | ≈1.6 kB/s |
 
-台架实测（同一条 `PowerDebugger`(VID 303A) 桥）：**6.25 kB/s 干净，33.6 kB/s 丢一半字节**，档 1 的 9.5 kB/s 待机 40 s 零丢帧但已贴边；所以台架采集用**档 2**留 2 倍余量，能跑满 1152000 的真 USB‑TTL（CH340/CH343/FT232）到手后再改回档 0。
+台架历史实测（同一条 `PowerDebugger Tx Serial Port` 桥）：**6.25 kB/s 干净，33.6 kB/s 丢一半字节**，档 1 的 9.5 kB/s 待机 40 s 零丢帧但已贴边。厂商手册另给出本地 USB 和 WiFi 直连模式约 978 Kbps 的串口回环参考值，说明该桥在不同模式下可能更快；先测接收端本地 USB 模式及实际丢帧，再决定是否更换适配器。未复测前，S2R 台架仍用档 2 留余量。
 
 HEALTH 字段口径（判读时容易误读）：
 

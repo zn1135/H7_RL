@@ -464,7 +464,7 @@ static void init_once(void)
     memset(&queue, 0, sizeof(queue));
     diag.boot = boot_id();
     s2r_init_error = diag.boot ? 0u : 1u;
-    diag.enabled = 1u;
+    diag.enabled = S2R_DIAGNOSTIC_DEFAULT;
     diag.initialized = 1u;
     diag.health_time = S2R_Now_Us();
     diag.meta_restart = 1u;

@@ -1326,6 +1326,11 @@
               <FileType>1</FileType>
               <FilePath>../imcalib/Telemetry/s2r_telemetry.c</FilePath>
             </File>
+            <File>
+              <FileName>vofa_trace.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/Telemetry/vofa_trace.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1785,4 +1790,3 @@
     <files />
   </RTE>
 </Project>
-

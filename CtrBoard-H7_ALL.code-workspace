@@ -2,18 +2,6 @@
     "folders": [
         {
             "path": "."
-        },
-        {
-            "path": "../leg_matlab_script"
-        },
-        {
-            "path": "../Leg2_v1(1)"
-        },
-        {
-            "path": "D:/迅雷下载/leg/wheelleg-reinforcement-learning-26_wheelleg"
-        },
-        {
-            "path": "../XYEGA_RM2026_WheelLeg_Infatry_RLdeploy-main"
         }
     ],
     "settings": {
@@ -40,7 +28,8 @@
             "editor.insertSpaces": true,
             "editor.tabSize": 4,
             "editor.autoIndent": "advanced"
-        }
+        },
+        "stm32cube-ide-clangd.path": "cube"
     },
     "extensions": {
         "recommendations": [

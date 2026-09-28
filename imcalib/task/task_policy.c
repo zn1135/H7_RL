@@ -3,6 +3,8 @@
 #include "rl_policy.h"
 #include "machine_config.h"
 #include "pid.h"
+#include "mono_ns.h"
+#include "../Telemetry/vofa_trace.h"
 
 #include <string.h>
 
@@ -68,13 +70,17 @@ static uint8_t RL_Joint_Map(float joint_pos[4], float joint_vel[6])
 }
 
 /* 构建观测 + 推历史; 源无效或映射未配置 → 观测清零返回 0 */
-static uint8_t RL_Control_Update_Observation(const float command[3])
+static uint8_t RL_Control_Update_Observation(const float command[3],
+                                             imu_state_t *used_imu,
+                                             uint64_t *obs_time_us)
 {
     imu_state_t imu = RL_IMU_Snapshot();
     float joint_pos[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float joint_vel[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     uint8_t source_valid;
 
+    *used_imu = imu;
+    *obs_time_us = Mono_Ns_Get() / 1000u;
     source_valid = (uint8_t)(imu.online && leg_l.output.valid
         && leg_r.output.valid && RL_Motors_Online()
         && RL_Joint_Map(joint_pos, joint_vel));
@@ -89,13 +95,17 @@ static uint8_t RL_Control_Update_Observation(const float command[3])
 }
 
 /* 未投入时的观测预览: 只供 VOFA, 不推历史 */
-static void RL_Observation_Preview(const float command[3])
+static void RL_Observation_Preview(const float command[3],
+                                   imu_state_t *used_imu,
+                                   uint64_t *obs_time_us)
 {
     imu_state_t imu = RL_IMU_Snapshot();
     float joint_pos[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float joint_vel[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     uint8_t source_valid;
 
+    *used_imu = imu;
+    *obs_time_us = Mono_Ns_Get() / 1000u;
     source_valid = (uint8_t)(imu.online && leg_l.output.valid
         && leg_r.output.valid && RL_Joint_Map(joint_pos, joint_vel));
     RL_Observation_Reset(&rl_control.observation);
@@ -150,23 +160,32 @@ static void RL_Infer_Body(void)
     float command[3];
     float action_t[RL_ACTION_SIZE] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};   /* 训练空间 */
     float action[RL_ACTION_SIZE] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};     /* 固件空间 */
+    imu_state_t used_imu;
+    uint64_t obs_time_us;
+    uint8_t engaged;
+    float inference_us = 0.0f;
 
     RL_Command_From_Rc(command);
+    engaged = output_task_rl_engaged();
 
     /* 未投入: 清历史 (预览观测照算供 VOFA), 发零动作保持新鲜 (LQR 挡也走这里) */
-    if (!output_task_rl_engaged())
+    if (!engaged)
     {
         warmup_cnt = 0u;
-        RL_Observation_Preview(command);
+        RL_Observation_Preview(command, &used_imu, &obs_time_us);
         RL_Action_Publish(action, 0u);
+        Vofa_Trace_Record(&used_imu, &rl_control.observation, action_t,
+                          obs_time_us, engaged, 0u, inference_us);
         return;
     }
 
-    if (!RL_Control_Update_Observation(command))
+    if (!RL_Control_Update_Observation(command, &used_imu, &obs_time_us))
     {
         /* 观测无效: 重新预热, 零力矩 */
         warmup_cnt = 0u;
         RL_Action_Publish(action, 0u);
+        Vofa_Trace_Record(&used_imu, &rl_control.observation, action_t,
+                          obs_time_us, engaged, 0u, inference_us);
         return;
     }
 
@@ -180,9 +199,12 @@ static void RL_Infer_Body(void)
         {
             RL_Observation_Set_Last_Action(&rl_control.observation, action_t);   /* 失败: 记录零动作 */
             RL_Action_Publish(action, 0u);   /* 推理失败 */
+            Vofa_Trace_Record(&used_imu, &rl_control.observation, action,
+                              obs_time_us, engaged, 0u, -1.0f);
             return;
         }
         RL_Action_Clip(action_t);
+        inference_us = (float)rl_control.policy.run_us;
     }
 
     RL_Observation_Set_Last_Action(&rl_control.observation, action_t);
@@ -191,6 +213,8 @@ static void RL_Infer_Body(void)
         action[i] = (float)map->sign[i] * action_t[i];   /* 训练 → 固件 */
     }
     RL_Action_Publish(action, 1u);
+    Vofa_Trace_Record(&used_imu, &rl_control.observation, action_t,
+                      obs_time_us, engaged, 1u, inference_us);
 }
 
 /* 策略初始化 */

@@ -9,6 +9,7 @@
 #include "ws2812.h"
 #include "task.h"
 #include "../Telemetry/s2r_telemetry.h"
+#include "../Telemetry/vofa_trace.h"
 
 #include <math.h>
 
@@ -297,8 +298,12 @@ void comm_task_body(void)
     Robot_Fallen_Update();
     Robot_Fault_Update();
     Robot_Enable_Update();
-    /* S2R1 诊断遥测占口时不再发旧 VOFA (见 imcalib/Telemetry) */
-    if (!S2R_Pump())
+    /* 同口互斥：S2R > 策略 VOFA > 旧力矩 VOFA；切换条件见 md/vofa_policy_trace.md。 */
+    if (S2R_Pump())
+    {
+        Vofa_Trace_Discard();
+    }
+    else if (!Vofa_Trace_Pump())
     {
         Robot_Control_Send_Vofa();
     }

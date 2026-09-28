@@ -21,6 +21,6 @@
 #error "MACHINE_VOFA_PORT must be 8 (UART8) or 1 (USART1)"
 #endif
 
-void Vofa_Send(const float *data, uint8_t n);
+uint8_t Vofa_Send(const float *data, uint8_t n);
 
 #endif

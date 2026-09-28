@@ -21,10 +21,10 @@
 extern volatile uint8_t s2r_diagnostic_requested;
 extern volatile uint32_t s2r_init_error;    /* bit0 启动 RNG 失败, bit1 META 溢出 */
 
-/* 烧录默认值: 1 = 上电即由 S2R1 诊断遥测占口; 0 = 上电发旧 VOFA (台架调试用)
- * 2026-09-27: 台架查 RL 投入时曾临时置 0, 查完改回 1 (要再看 VOFA 就临时改 0 重编, 或调试器写 s2r_diagnostic_requested=0) */
+/* 烧录默认值: 0 = 上电发策略 VOFA; 1 = 上电由 S2R1 占口。
+ * 旧 VOFA 布局可通过 vofa_trace_requested=0 在失能时切换。 */
 #ifndef S2R_DIAGNOSTIC_DEFAULT
-#define S2R_DIAGNOSTIC_DEFAULT 1u
+#define S2R_DIAGNOSTIC_DEFAULT 0u
 #endif
 
 /* ============================================================================
