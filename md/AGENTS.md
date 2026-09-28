@@ -93,6 +93,7 @@
 
 ## §6 验证与诚实
 
+- Linux 下 eIDE/GCC 的新机器依赖、路径约束和 `libhostfxr.so` 排错见 [构建环境说明](eide-gcc-build.md)；本机 .NET 环境变量放在 VS Code 用户设置，提交前检查工具链配置中没有个人绝对路径。
 - 本项目是 **Keil MDK / eIDE** 工程。Keil AC5 在 `D:\keil\keil_core\ARM\armcc_5\bin\armcc.exe`，完整编译参数取自 `build/CtrBoard-H7_ALL/compile_commands.json`。改完先编译；核验编译必须把 `-o` 改到临时目录，不能污染 eIDE 增量构建目录。启动汇编用 `armasm.exe`。
 - **但链接、下载、上机做不了** → 物理符号、增益、轴向一律标 **"待台架 / 待实测"**。
 - **能做的核验要做**：纯数学/几何推导、数值仿真（Python）有价值，做了就说"已数值核验"；但物理符号、增益、轴向只能上台架定。

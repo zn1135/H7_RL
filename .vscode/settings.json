@@ -1,8 +1,4 @@
 {
     "EIDE.ARM.GCC.InstallDirectory": "../../.local/opt/arm-none-eabi/usr",
-    "EIDE.ARM.GCC.Prefix": "arm-none-eabi-",
-    "EIDE.Builder.EnvironmentVariables": [
-        "DOTNET_ROOT=../../.local/share/dotnet",
-        "PATH=../../.local/bin:../../.local/share/dotnet:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    ]
+    "EIDE.ARM.GCC.Prefix": "arm-none-eabi-"
 }
