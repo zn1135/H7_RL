@@ -1,0 +1,12 @@
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/port.c
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+ctrboard-h7_all\port.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\stddef.h
+ctrboard-h7_all\port.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\stdint.h
+ctrboard-h7_all\port.o: ../Core/Inc/FreeRTOSConfig.h
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+ctrboard-h7_all\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h

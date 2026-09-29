@@ -1,12 +1,12 @@
 # 整机诊断串口接线、采集与验收
 
-本次接入在 `little-wheelleg` 分支完成（自 `a824da1` 起，变更 104），与现有控制代码**去耦**：`imcalib/Telemetry/` 只读现有状态，任务层只有 `commTask` 里的 `S2R_Pump()` 一个挂点。协议布局见 [sim2real_serial_protocol.md](sim2real_serial_protocol.md)；哪些字段本分支拿不到，以 META 的 `unavailable` / `derived` 两栏为准。当前上电默认通过机器表指定的 UART8 发送 [策略 VOFA 追踪](vofa_policy_trace.md)；以下 S2R 步骤仅在显式切换后适用。
+本次接入在 `little-wheelleg` 分支完成（自 `a824da1` 起，变更 104），与现有控制代码**去耦**：`imcalib/Telemetry/` 只读现有状态，任务层只有 `commTask` 里的 `S2R_Pump()` 一个挂点。协议布局见 [sim2real_serial_protocol.md](sim2real_serial_protocol.md)；哪些字段本分支拿不到，以 META 的 `unavailable` / `derived` 两栏为准。当前上电默认通过 UART8 发送 [普通 VOFA JustFloat](vofa_policy_trace.md)；本页的 S2R1 二进制采集仅在显式切换后适用。
 
 ## 1. 接线和准备
 
-- 默认使用 UART8：板端 PE1（TX）接 TTL 转接器 RX，两端 GND 共地，电脑选择转接器 COM 口。可选板载 USB CDC 的切换见 [传输说明](usb-cdc-telemetry.md)。
+- 默认使用 UART8：板端 PE1（TX）经原无线串口链路接电脑，选择该链路对应的 COM 口。板载 USB CDC 仍可在后续切换测试，现状见 [传输说明](usb-cdc-telemetry.md)。
 - USB CDC 的 1152000、8N1 是 line coding，USB 传输速率不由此控制；UART8 按实际 1152000、8N1、无流控运行。VOFA+ 与本工具不能同时占用同一 COM 口。
-- 遥测口上电默认发策略 VOFA 追踪。若要使用本页 S2R1 流程，需在失能、无会话且发送完成时把 `s2r_diagnostic_requested` 写 1；两种协议互斥。UART7 仍接 IMU，UART9 仍接遥控。无诊断串口启动电机/策略指令。
+- 遥测口上电默认发普通 VOFA JustFloat，固定通道可由 VOFA+ 接收并保存 CSV。若要使用本页 S2R1 二进制流程，需在失能、无会话且发送完成时把 `s2r_diagnostic_requested` 写 1，并改用 `tools/s2r_capture.py`；两种协议互斥。UART7 仍接 IMU，UART9 仍接遥控。无诊断串口启动电机/策略指令。
 
 采集工具不改变任何控制路径；要采集网络策略，按原有流程（左上挡 + 右中位）投入推理。
 
@@ -62,7 +62,7 @@ python tools/s2r_capture.py --port /dev/ttyUSB0 --baud 1152000 --seconds 20 --ou
 Windows，将设备改成实际 COM 口、输出改成新目录：
 
 ```powershell
-python tools/s2r_capture.py --port COM5 --baud 1152000 --seconds 20 --output s2r_capture_01
+python tools/s2r_capture.py --port COMx --baud 1152000 --seconds 20 --output s2r_capture_01
 ```
 
 省略 `--seconds` 持续采集，Ctrl+C 正常收尾。程序不调用串口 write，不发送启停或切换命令；打开前请求 DTR/RTS 为低，仍建议不接这两根线。目录必须不存在，防止覆盖旧数据。
@@ -143,7 +143,7 @@ commTask → S2R_Pump() → 预分配 FIFO → 编码/CRC → AXI SRAM 缓冲 �
 
 本分支**不往现有任务和结构体里插钩子**：`s2r_source.c` 用变化检测推断事件（`policy.run_ok+run_fail` → 一次推理；`hi229_data.ts`/`last_rx_tick` → IMU 新帧；`dm/dji_motor_feedback[].last_rx_tick` → 电机新帧），字段拿不到就按协议写 NaN/0，不伪造。控制侧不等待串口、不创建 JSON、不分配堆内存。24 槽 FIFO 中 4 槽留给 EVENT/HISTORY/META；满时丢弃新帧并计数。事件重复 3 次仍可能全丢，必须依赖持续状态。DMA 忙时不写发送缓冲。
 
-调试器将 `s2r_diagnostic_requested=0`，只有**电机失能、session=0、上一帧发送完成**时才恢复策略 VOFA；否则等待条件满足。设回 1 恢复 S2R1 并重发 META。传输端口由 `vofa_transport.requested` 选择（1 = UART，0 = USB CDC），切换条件见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。诊断取数和计时仍执行，不能把它当作“完全关闭遥测开销”的 A/B。
+调试器将 `s2r_diagnostic_requested=0`，只有**电机失能、session=0、上一帧发送完成**时才恢复普通 VOFA；否则等待条件满足。设回 1 恢复 S2R1 并重发 META。传输端口由 `vofa_transport.requested` 选择（1 = UART，0 = USB CDC），切换条件见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。诊断取数和计时仍执行，不能把它当作“完全关闭遥测开销”的 A/B。
 
 ## 7. 已做验证与待验收
 

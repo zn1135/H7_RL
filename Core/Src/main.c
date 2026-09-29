@@ -73,7 +73,7 @@ void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN 0 */
 static void USB_Dma_Memory_Init(void)
 {
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__CC_ARM)
   extern uint32_t _siusb_data, _susb_data, _eusb_data;
   extern uint32_t _susb_bss, _eusb_bss;
   uint32_t *source;

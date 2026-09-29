@@ -3077,6 +3077,44 @@ wheel_vel + 腿运动学 ──► ds_raw ──┬─► Lowpass α=0.3 ──�
 
 ---
 
+## 变更 105 · 大机角速度增加来源通道并互换 X/Y（作者 2026-09-29 指定）
+
+**依据**：作者明确要求角速度像欧拉角一样有独立来源通道，并确认“roll 跟 pitch 取反”指 **X/Y 交换来源通道，保持现有符号**，范围仅当前默认大机。物理轴向仍待台架核对。
+
+| 文件 | 改动 |
+| --- | --- |
+| `imcalib/user-lib/machine_config.h/c` | `.imu` 新增 `gyr_src[3]`；大机由隐含恒等 `{0,1,2}` 改为 `{1,0,2}`，小机显式 `{0,1,2}`；两机 `gyr_sign` 均不变 |
+| `imcalib/task/task_imu.c` | `gyro_rad_s[i]` 由 `gyr_sign[i] × sample.gyr[i]` 改为 `gyr_sign[i] × sample.gyr[gyr_src[i]]`，再做 deg/s→rad/s |
+| `imcalib/Telemetry/s2r_telemetry.c` | META 的 `imu` 对象新增 `gyro_src`，与已有 `gyro_sign` 一起记录实际映射 |
+| `md/IO_CHAINS.md`、`md/sim2real_serial_protocol.md` | 同步数据链路及 META 字段语义 |
+
+**输入 / 输出 / 调用链**：`HI229_Snapshot().gyr[]` → `imu_task_body()` 按机器表选择来源并乘原符号 → `imu_state.gyro_rad_s[]` → RL 观测、LQR、VOFA 与 S2R；模块原始数据、欧拉角、四元数、加速度和小机角速度输出不变。
+
+**核对**：`py -3 tools/s2r_build_info.py` 重新生成构建指纹、`--check` 通过；按 `build/CtrBoard-H7_ALL/compile_commands.json` 全量 GCC 编译 96 个 C 文件，0 失败、1 条既有 BMI088 `packed` 告警，输出均在临时目录。`py -3 tests/test_s2r.py ProtocolTests` 为 8/8；主机 C 测试缺本机原生 GCC，未运行。未下载、未上机。
+
+**待台架**：大机失能状态下分别绕机体 roll/pitch 轴转动，核对映射后的角速度 X/Y 通道及对应欧拉角的方向和量纲；本次代码编译不能代替轴向实测。
+
+---
+
+## 变更 106 · 加速度增加独立来源通道（作者 2026-09-29 要求自行调整通道值）
+
+**依据**：作者要求为加速度增加与角速度相同的通道映射机制，映射值后续自行改动。本次大机、小机都先填恒等 `{0,1,2}`，不改变当前加速度输出；现有 `acc_sign`、欧拉角、角速度和四元数配置值保持原样。
+
+| 文件 | 改动 |
+| --- | --- |
+| `imcalib/user-lib/machine_config.h/c` | `.imu` 新增 `acc_src[3]`，两机显式填 `{0,1,2}`；`acc_sign` 仍作用于映射后的输出 X/Y/Z |
+| `imcalib/task/task_imu.c` | `acc_g[i]` 由 `acc_sign[i] × sample.acc[i]` 改为 `acc_sign[i] × sample.acc[acc_src[i]]` |
+| `imcalib/Telemetry/s2r_telemetry.c` | META 的 `imu` 对象新增 `acc_src` 和 `acc_sign`，记录实际映射与符号 |
+| `md/IO_CHAINS.md`、`md/sim2real_serial_protocol.md` | 同步数据链路及 META 字段语义 |
+
+**输入 / 输出 / 调用链**：`HI229_Snapshot().acc[]` → `imu_task_body()` 按机器表选择来源并乘原符号 → `imu_state.acc_g[]` → LQR 前向加速度与诊断遥测；RL 观测不直接读取加速度，但依赖四元数计算投影重力。
+
+**核对**：重新生成 S2R 构建指纹，`--check` 通过；按 `build/CtrBoard-H7_ALL/compile_commands.json` 全量 GCC 编译 96 个 C 文件，0 失败、1 条既有 BMI088 `packed` 告警，输出均在临时目录；`py -3 tests/test_s2r.py ProtocolTests` 为 8/8。未下载、未上机。
+
+**待台架**：作者调整 `acc_src` 后，分别沿机体 X/Y/Z 方向施加加速度并核对输出通道与符号；编译通过不代表轴向已验证。
+
+---
+
 ## 附录 A · 每次改完必须跑的核对
 
 1. 全量编译：按 `build/CtrBoard-H7_ALL/compile_commands.json` 逐条执行 armcc 命令（`-o` 指到临时目录即可）→ 要求 `0 fail / 0 warn`。

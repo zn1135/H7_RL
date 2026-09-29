@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Passively save UART policy trace bytes, then decode without VOFA+."""
+"""Passively save UART or USB CDC policy trace bytes, then decode without VOFA+."""
 
 import argparse
 from datetime import datetime, timezone
@@ -72,7 +72,7 @@ def capture(device, output, seconds, port, baud):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--port", help="UART adapter COM port, e.g. COM5")
+    source.add_argument("--port", help="UART wireless adapter COM port (or STM32 USB CDC), e.g. COM5")
     source.add_argument("--list-ports", action="store_true", help="list ports without opening them")
     parser.add_argument("--output", type=Path, help="new output directory; existing directories are refused")
     parser.add_argument("--baud", type=int, default=1152000)

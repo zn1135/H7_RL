@@ -189,11 +189,9 @@ static void Robot_Enable_Update(void)
 /*
  * VOFA 观测帧 (JustFloat, 32 通道)
  * ch0 在线掩码；ch1 状态位；ch2 RL 状态位。
- * ch3~6 下发力矩 rl_output_dm_cmd_nm；ch7/8 轮力矩指令；
- * ch9~12 实测 DM 力矩；ch13~16 观测四腿角(训练空间)；
- * ch17~22 观测六关节速度；ch23~28 使能后上次动作，失能时 UART9 接收诊断；
- * ch29/30 轮电流 raw(交叉源)；
- * ch31 故障位 ctrl_fault。每二十次 commTask 周期发送一次。
+ * ch3~5 欧拉角；ch6~8 角速度；ch9~11 加速度；
+ * ch12~14 RL 投影重力；ch15~31 当前未赋值。
+ * 每二十次 commTask 周期发送一次。
  * LQR 布局(状态 x/target/腿长/u)在下方注释里备查。
  */
 static void Robot_Control_Send_Vofa(void)
@@ -201,7 +199,6 @@ static void Robot_Control_Send_Vofa(void)
     static float dbg[VOFA_MAX_CH];
     static uint8_t send_div;
     uint8_t online_mask;
-    uint8_t i;
     uint16_t state_bits;
     uint32_t rl_bits;
 
@@ -246,35 +243,48 @@ static void Robot_Control_Send_Vofa(void)
     rl_bits |= output_debug_dji_sent ? 0x00020000u : 0x00u;
     dbg[2] = (float)rl_bits;
 
+
+    // dbg[3]  = imu_state.euler_rad[0];
+    // dbg[4]  = imu_state.euler_rad[1];
+    // dbg[5]  = imu_state.euler_rad[2];
+    // dbg[6]  = imu_state.gyro_rad_s[0];
+    // dbg[7]  = imu_state.gyro_rad_s[1];
+    // dbg[8]  = imu_state.gyro_rad_s[2];
+    dbg[9]  = rl_control.observation.obs[0];
+    dbg[10] = rl_control.observation.obs[1];
+    dbg[11] = rl_control.observation.obs[2];
+    dbg[12] = rl_control.observation.obs[3];
+    dbg[13] = rl_control.observation.obs[4];
+    dbg[14] = rl_control.observation.obs[5];
     /* RL 观测/出力布局 (a824da1 曾注释, 2026-09-27 恢复) */
-    for (i = 0u; i < DM_MOTOR_NUM; i++)
-    {
-        dbg[3u + i] = rl_output_dm_cmd_nm[i];
-        dbg[9u + i] = motor_state.dm.trq_nm[i];
-        dbg[13u + i] = rl_control.observation.obs[RL_OBS_L_THIGH + i];
-    }
-    dbg[7] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_LFT];
-    dbg[8] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_RGT];
-    for (i = 0u; i < DJI_MOTOR_NUM; i++)
-    {
-        dbg[29u + i] = motor_state.dji.current_raw[
-            (i == DJI_MOTOR_WHEEL_LFT) ? DJI_MOTOR_WHEEL_RGT : DJI_MOTOR_WHEEL_LFT];
-    }
-    for (i = 0u; i < RL_ACTION_SIZE; i++)
-    {
-        dbg[17u + i] = rl_control.observation.obs[RL_OBS_L_THIGH_VEL + i];
-        dbg[23u + i] = rl_control.observation.obs[RL_OBS_LAST_ACTION + i];
-    }
-    if (!robot_state.motor_enabled)
-    {
-        dbg[23] = (float)huart9.RxState;
-        dbg[24] = (float)hdma_uart9_rx.State;
-        dbg[25] = (float)__HAL_DMA_GET_COUNTER(&hdma_uart9_rx);
-        dbg[26] = (float)dbus_rx.dma_pos;
-        dbg[27] = (float)dbus_rx.isr_len;
-        dbg[28] = (float)dr16.last_rx_tick;
-    }
-    dbg[31] = (float)ctrl_fault;   /* 0x10 = FAULT_ACTION */
+    // for (i = 0u; i < DM_MOTOR_NUM; i++)
+    // {
+    //     dbg[3u + i] = rl_output_dm_cmd_nm[i];
+    //     dbg[9u + i] = motor_state.dm.trq_nm[i];
+    //     dbg[13u + i] = rl_control.observation.obs[RL_OBS_L_THIGH + i];
+    // }
+    // dbg[7] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_LFT];
+    // dbg[8] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_RGT];
+    // for (i = 0u; i < DJI_MOTOR_NUM; i++)
+    // {
+    //     dbg[29u + i] = motor_state.dji.current_raw[
+    //         (i == DJI_MOTOR_WHEEL_LFT) ? DJI_MOTOR_WHEEL_RGT : DJI_MOTOR_WHEEL_LFT];
+    // }
+    // for (i = 0u; i < RL_ACTION_SIZE; i++)
+    // {
+    //     dbg[17u + i] = rl_control.observation.obs[RL_OBS_L_THIGH_VEL + i];
+    //     dbg[23u + i] = rl_control.observation.obs[RL_OBS_LAST_ACTION + i];
+    // }
+    // if (!robot_state.motor_enabled)
+    // {
+    //     dbg[23] = (float)huart9.RxState;
+    //     dbg[24] = (float)hdma_uart9_rx.State;
+    //     dbg[25] = (float)__HAL_DMA_GET_COUNTER(&hdma_uart9_rx);
+    //     dbg[26] = (float)dbus_rx.dma_pos;
+    //     dbg[27] = (float)dbus_rx.isr_len;
+    //     dbg[28] = (float)dr16.last_rx_tick;
+    // }
+    // dbg[31] = (float)ctrl_fault;   /* 0x10 = FAULT_ACTION */
 
     // dbg[31] = (float)rl_control.policy.run_us;
 
@@ -311,7 +321,7 @@ void comm_task_body(void)
     Robot_Fallen_Update();
     Robot_Fault_Update();
     Robot_Enable_Update();
-    /* 同口互斥：S2R > 策略 VOFA > 旧力矩 VOFA；切换条件见 md/vofa_policy_trace.md。 */
+    /* 同口互斥：S2R > 策略 VOFA > 普通 VOFA；切换条件见 md/vofa_policy_trace.md。 */
     s2r_active = S2R_Pump();
     if (s2r_active)
     {

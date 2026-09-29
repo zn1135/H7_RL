@@ -17,12 +17,12 @@
 #define S2R_ACTION_NUM      6u
 #define S2R_LATENT_NUM      3u
 
-/* 调试器回退: 0 → 待机切回策略 VOFA (仅电机失能、无会话、发送完成时生效) */
+/* 调试器回退: 0 → 待机切回 VOFA (仅电机失能、无会话、发送完成时生效) */
 extern volatile uint8_t s2r_diagnostic_requested;
 extern volatile uint32_t s2r_init_error;    /* bit0 启动 RNG 失败, bit1 META 溢出 */
 
 /* 烧录默认值: 0 = 上电发 VOFA; 1 = 上电由 S2R1 占口。
- * VOFA 布局由 vofa_trace_requested 选择，当前上电默认为策略追踪。 */
+ * VOFA 布局由 vofa_trace_requested 选择；当前上电默认普通 JustFloat。 */
 #ifndef S2R_DIAGNOSTIC_DEFAULT
 #define S2R_DIAGNOSTIC_DEFAULT 0u
 #endif
@@ -37,7 +37,7 @@ extern volatile uint32_t s2r_init_error;    /* bit0 启动 RNG 失败, bit1 META
  * 板载 USB CDC 需重新实测, 不沿用串口桥结果。
  * ==========================================================================*/
 #ifndef S2R_RATE_LOW
-#define S2R_RATE_LOW   2u
+#define S2R_RATE_LOW   1u
 #endif
 
 #if S2R_RATE_LOW == 0u

@@ -214,7 +214,7 @@ CtrBoard-H7_ALL/
 | 策略仲裁 | task_actuation.c | ✅ 编译通过（左拨杆 中=LQR / 上=RL / 下=失能；右拨杆中位=投入，其他=零力矩）；🟡 待台架 |
 | 简单函数库 | user-lib/simple-function.c/h | ✅ 一阶低通 + 斜坡函数，编译通过 |
 | 速度卡尔曼 | user-lib/kalman.c/h | ✅ 照抄 Leg2_v1，编译通过；🟡 加速度符号待台架 |
-| 整机诊断遥测 | Telemetry/s2r_wire + s2r_source + s2r_telemetry | ✅ 原 UART 版移植完成（去耦采样 + 单挂点 `S2R_Pump()`，当时 Keil 全量编译链接 0 error；协议测试 8/8）；🟡 USB CDC DMA 改动待构建与台架验收（见 `md/usb-cdc-telemetry.md`） |
+| 整机诊断遥测 | Telemetry/s2r_wire + s2r_source + s2r_telemetry | ✅ UART 版移植完成（去耦采样 + 单挂点 `S2R_Pump()`，Keil 全量编译链接 0 error；协议测试 8/8）；🟡 USB CDC 能枚举但原始接收为 0 字节，暂回 UART 测试（见 `md/usb-cdc-telemetry.md`） |
 
 ---
 
@@ -229,7 +229,7 @@ CtrBoard-H7_ALL/
 - **HI229 姿态**：直接使用模块输出的四元数 + 欧拉角，Attitude_Algorithm 只做归一化和单位转换；取轴与符号来自机器表 `machine->imu`（`task_imu.c` 应用），驱动 `hi229.c/h` 只出原始值
 - **标定**：500ms (200ms 暖机 + 300ms 采样)（历史记录：当前代码中已找不到对应标定/暖机流程，`imcalib`/`Core` 无相关实现；疑属已移除的 sysid/标定模块。作者 2026-09-25 确认：按现状保留为历史说明）
 - **串口接收**：IDLE+DMA Circular，不使用 Resync，任务层校验
-- **VOFA 调试**：当前上电默认经机器表指定的 UART8 发送 32 通道 JustFloat 策略追踪，`policyTask` 每拍生成观测/IMU-动作两帧，首次投入及每秒补五帧历史，`commTask` 异步发送；字段、时间戳和解码见 [vofa_policy_trace.md](vofa_policy_trace.md)。`vofa_trace_requested=0` 且失能、发送完成时切到旧力矩布局；旧布局约 50 Hz，ch0/1/2 可查在线、使能与 RL 状态，失能期间 ch23～28 为 UART9 接收诊断。`S2R_DIAGNOSTIC_DEFAULT=0`，S2R 默认不占遥测口，需要时显式切换。USB 传输与 UART 回退见 [usb-cdc-telemetry.md](usb-cdc-telemetry.md)。
+- **VOFA 调试**：当前上电默认经 UART8 发送普通 32 通道 JustFloat，ch3～14 为 IMU 与投影重力，VOFA+ 可直接接收并保存 CSV；字段见 [vofa_policy_trace.md](vofa_policy_trace.md)。失能且发送完成时写 `vofa_trace_requested=1` 可切到多帧型策略追踪。`S2R_DIAGNOSTIC_DEFAULT=0`，S2R1 二进制流需显式切换并用 `tools/s2r_capture.py` 接收；板载 USB CDC 留作后续有线测试，见 [usb-cdc-telemetry.md](usb-cdc-telemetry.md)。
 - **诊断遥测 (gap 测试)**：`imcalib/Telemetry/` 自包含模块（`s2r_wire` 编码/队列 + `s2r_source` 只读采样 + `s2r_telemetry` 成帧/发送泵），**只读**现有状态、不改任何现有结构体；任务层唯一挂点是 `task_comm.c::comm_task_body()` 末尾的 `S2R_Pump()`。与 32 路 VOFA 同口互斥（`S2R_DIAGNOSTIC_DEFAULT`、`s2r_diagnostic_requested`，变更 104）。**`S2R_RATE_LOW` 限流档**：0 = 原设定（待机 ≈58 kB/s）、1 = 低速 ≈9.5 kB/s、2 = 稳健 ≈4.3 kB/s（**USB CDC 首轮默认**）、3 = 极低 ≈1.6 kB/s；USB CDC 实测后再决定是否切到档 1/0。**短窗录制**：**默认全自动**（`S2R_RECORD_AUTO=1`）—— 投入建会话即按 md 的 100 Hz 把 CONTROL 完整快照存进 192 KB 片内缓存（≈4.1 s，满即停），失能后再录 200 ms 尾巴即停并自动慢速回放导出，**全程不需要调试器**；调试器写 `s2r_record_requested`/`s2r_replay_requested` 仍可手动覆盖（`s2r_record_state`/`s2r_record_frames` 只读），对应协议 §10 第一条建议 + §13.1。未插桩的字段按协议写 NaN/0，清单在 META 的 `unavailable`/`derived`。**改源码后必须先 `python tools/s2r_build_info.py` 再编译**（否则烧录代码与 META 身份不一致）
 - **DJI 力矩常数**：`per_raw` 按型号满电流堵转力矩 / 满 raw × (`machine->dji_gear_ratio` / 标准减速比) 缩放，见 `dji.c` 的 `Dji_Torque_To_Current()`；**Kt 绝对值仍待台架实测**
 - **机器切换**：改 `imcalib/user-lib/machine_config.h` 的 `MACHINE_DEFAULT`（两份表在 `machine_config.c`，含刻度、满量程、限幅、**极性**，以及 **IMU 取轴与符号 `.imu`**、**RL 关节映射 `.rl`**）；DM 的 PMAX/VMAX/TMAX 以电机实际配置为准，用达妙上位机读一次与配置表比对

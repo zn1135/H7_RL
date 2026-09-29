@@ -25,8 +25,8 @@ static struct {
     uint8_t last_engaged;
 } trace;
 
-volatile uint8_t vofa_trace_requested = 1u;
-static volatile uint8_t trace_enabled = 1u;
+volatile uint8_t vofa_trace_requested = 0u;
+static volatile uint8_t trace_enabled = 0u;
 static volatile uint8_t sync_requested = 1u;
 
 /* 帧首 */

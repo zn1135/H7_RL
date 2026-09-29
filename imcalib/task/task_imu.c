@@ -33,7 +33,7 @@ void imu_task_body(void)
     if (!next.online)
         Attitude_Init(&next);
 
-    /* 欧拉角、四元数分别按源通道重映射，再独立应用极性 */
+    /* 姿态和惯性量各按来源通道与极性映射 */
     cfg = &machine->imu;
     next.quat[0] = sample.quat[0];
     for (i = 0u; i < 3u; i++)
@@ -41,8 +41,8 @@ void imu_task_body(void)
         next.quat[i + 1u]        = (float)cfg->quat_sign[i]
                                  * sample.quat[cfg->quat_src[i] + 1u];
         next.euler_deg[i]        = (float)cfg->eul_sign[i] * sample.eul[cfg->eul_src[i]];
-        next.gyro_rad_s[i]       = (float)cfg->gyr_sign[i] * sample.gyr[i] * 0.01745329251994f;
-        next.acc_g[i]            = (float)cfg->acc_sign[i] * sample.acc[i];
+        next.gyro_rad_s[i]       = (float)cfg->gyr_sign[i] * sample.gyr[cfg->gyr_src[i]] * 0.01745329251994f;
+        next.acc_g[i]            = (float)cfg->acc_sign[i] * sample.acc[cfg->acc_src[i]];
     }
 
     /* 四元数归一化 + deg→rad */

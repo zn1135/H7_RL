@@ -14,7 +14,7 @@ TARGET = ROOT / "imcalib/Telemetry/s2r_build_info.h"
 def source_digest():
     digest = hashlib.sha256()
     paths = []
-    for folder in ("Core", "imcalib", "X-CUBE-AI/App"):
+    for folder in ("Core", "imcalib", "USB_DEVICE", "X-CUBE-AI/App"):
         paths.extend(p for p in (ROOT / folder).rglob("*") if p.suffix in (".c", ".h") and p != TARGET)
     for p in sorted(paths):
         digest.update(p.relative_to(ROOT).as_posix().encode() + b"\0" + p.read_bytes())

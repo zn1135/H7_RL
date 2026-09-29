@@ -49,8 +49,10 @@ typedef struct {
 typedef struct {
     uint8_t eul_src[3];   /* 欧拉角来源, 按机体 俯仰/横滚/偏航 序; 值 = 模块 0 Roll / 1 Pitch / 2 Yaw */
     int8_t  eul_sign[3];  /* 欧拉角符号, 同序 */
-    int8_t  gyr_sign[3];  /* 角速度符号, 模块 X/Y/Z */
-    int8_t  acc_sign[3];  /* 加速度符号, 模块 X/Y/Z */
+    uint8_t gyr_src[3];   /* 角速度来源, 按机体 X/Y/Z 序 */
+    int8_t  gyr_sign[3];  /* 角速度符号, 输出 X/Y/Z */
+    uint8_t acc_src[3];   /* 加速度来源, 按机体 X/Y/Z 序 */
+    int8_t  acc_sign[3];  /* 加速度符号, 输出 X/Y/Z */
     uint8_t quat_src[3];  /* 四元数输出 X/Y/Z 分别取模块 X/Y/Z 哪一路 */
     int8_t  quat_sign[3]; /* 四元数输出 X/Y/Z 极性, 独立于 quat_src */
 } imu_cfg_t;

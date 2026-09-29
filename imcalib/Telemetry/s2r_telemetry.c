@@ -984,7 +984,8 @@ static void build_meta(void)
     json_append("\"feedback\":{\"dm_torque\":\"driver MIT estimate\",\"wheel_torque\":null,\"motor_current_A\":null,\"accel_includes_gravity\":null},");
     json_array("gas_force_n", m->gas_spring_force_n, 2u);
     json_append("\"gas_sign\":[%d,%d],\"leg_lengths\":[%.9g,%.9g],", m->gas_comp_sign[0], m->gas_comp_sign[1], (double)m->leg_lu, (double)m->leg_lg);
-    json_append("\"imu\":{\"quat_order\":\"wxyz\",\"quat_src\":[%u,%u,%u],\"quat_sign\":[%d,%d,%d],\"gyro_sign\":[%d,%d,%d],\"filter\":\"quaternion normalization, no additional telemetry filter\",\"rx_time\":\"commTask sampling time\"},", m->imu.quat_src[0], m->imu.quat_src[1], m->imu.quat_src[2], m->imu.quat_sign[0], m->imu.quat_sign[1], m->imu.quat_sign[2], m->imu.gyr_sign[0], m->imu.gyr_sign[1], m->imu.gyr_sign[2]);
+    json_append("\"imu\":{\"quat_order\":\"wxyz\",\"quat_src\":[%u,%u,%u],\"quat_sign\":[%d,%d,%d],\"gyro_src\":[%u,%u,%u],\"gyro_sign\":[%d,%d,%d],", m->imu.quat_src[0], m->imu.quat_src[1], m->imu.quat_src[2], m->imu.quat_sign[0], m->imu.quat_sign[1], m->imu.quat_sign[2], m->imu.gyr_src[0], m->imu.gyr_src[1], m->imu.gyr_src[2], m->imu.gyr_sign[0], m->imu.gyr_sign[1], m->imu.gyr_sign[2]);
+    json_append("\"acc_src\":[%u,%u,%u],\"acc_sign\":[%d,%d,%d],\"filter\":\"quaternion normalization, no additional telemetry filter\",\"rx_time\":\"commTask sampling time\"},", m->imu.acc_src[0], m->imu.acc_src[1], m->imu.acc_src[2], m->imu.acc_sign[0], m->imu.acc_sign[1], m->imu.acc_sign[2]);
     json_append("\"mass_kg\":null,\"payload\":null,\"ground_friction\":null,\"world_position\":null,\"true_linear_velocity\":null}");
 }
 

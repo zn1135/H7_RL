@@ -323,7 +323,7 @@ Leg_Solve 当前已完成以下验证：
 
 后续 RL 整链路仍按以下顺序进行，任何一步失败则停止：
 
-（下列 ch 号为历史 RL 调试帧布局，不能用于当前采集；当前上电使用策略 VOFA 追踪，通道定义见 [vofa_policy_trace.md](vofa_policy_trace.md)。）
+（下列 ch 号为历史 RL 调试帧布局，不能用于当前采集；当前上电使用普通 VOFA JustFloat，通道定义见 [vofa_policy_trace.md](vofa_policy_trace.md)。）
 
 ```
 ① .rl 已按候选 A 填 (变更 98); 台架核对 (左拨杆上, 不投入即可, 变更 99 起有观测预览):
@@ -417,6 +417,6 @@ Leg_Solve 当前已完成以下验证：
 
 ### 8.3 VOFA
 
-当前上电默认经机器表指定的 UART8 发送策略 VOFA 的观测、同源 IMU、动作和历史追踪，详见 [vofa_policy_trace.md](vofa_policy_trace.md)。旧 RL 力矩布局作为备用，失能且发送完成时写 `vofa_trace_requested=0` 可切换；**以 `task_comm.c::Robot_Control_Send_Vofa()` 上方注释为准**：ch0 在线掩码、ch1 状态位、ch2 RL 状态位、ch3~8 腿/轮力矩请求、ch9~12 DM 力矩反馈、ch13~22 关节观测、ch23~28 在失能时为 UART9 接收诊断、使能后为上次动作、ch29~30 轮电流 raw、ch31 故障位；每 20 次 commTask 周期尝试发送一帧，约 50 Hz。
+当前上电默认经机器表指定的 UART8 发送普通 VOFA JustFloat 的固定 IMU 布局，VOFA+ 可直接保存 CSV，详见 [vofa_policy_trace.md](vofa_policy_trace.md)；**以 `task_comm.c::Robot_Control_Send_Vofa()` 上方注释为准**：ch0 在线掩码、ch1 状态位、ch2 RL 状态位、ch3～5 欧拉角、ch6～8 角速度、ch9～11 加速度、ch12～14 投影重力，约 50 Hz。失能且发送完成时写 `vofa_trace_requested=1` 可切到策略追踪；S2R1 二进制流为显式切换的另一种模式。
 
 历史（RL 调试帧，`task_comm.c` 内已注释留档）：RL 模式（推理路径且左拨杆上位）曾复用 LQR 无意义的通道，下标不动：ch3~5 投影重力、ch6 RL 状态位、ch7~9 观测角速度（策略机体系，已镜像、×0.25）、ch10~13 固件原始 thigh / vs、ch15~20 观测关节速度（×0.05）、ch21~24 观测关节角、ch25~30 力矩命令（总输出关也有值）、ch31 推理耗时。

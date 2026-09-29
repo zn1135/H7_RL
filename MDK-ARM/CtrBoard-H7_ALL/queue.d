@@ -1,0 +1,15 @@
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/queue.c
+ctrboard-h7_all\queue.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\stdlib.h
+ctrboard-h7_all\queue.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\string.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+ctrboard-h7_all\queue.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\stddef.h
+ctrboard-h7_all\queue.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\stdint.h
+ctrboard-h7_all\queue.o: ../Core/Inc/FreeRTOSConfig.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
+ctrboard-h7_all\queue.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h

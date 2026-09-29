@@ -30,12 +30,15 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
         .leg_off_phi0   = {-0.13f, -0.07f},
         .gas_spring_force_n = {150.0f, 150.0f},
         .gas_comp_sign = {0, 0},                     /* 左右符号待台架 */
-        /* IMU: 照抄原 hi229.h 全局宏, 大机器待实测 */
+        /* IMU 轴映射待台架核对 */
         .imu = {
-            .eul_src   = {1, 0, 2}, 
-            .eul_sign  = {1, 1, -1},
-            .gyr_sign  = {1, 1, -1}, /* RL 训练轴: 低头 +pitch、左滚 +roll、左偏航 -yaw */
-            .acc_sign  = {-1, 1, -1},
+            //roll pitch yaw
+            .eul_src   = {0,1, 2},
+            .eul_sign  = {-1, 1, 1},
+            .gyr_src   = {1,0, 2},
+            .gyr_sign  = {-1, 1, 1},
+            .acc_src   = {1,0, 2},
+            .acc_sign  = {-1, -1, -1},
             .quat_src  = {0, 1 , 2},    /* 四元数 X/Y 通道交换; 这里只选通道 */
             .quat_sign = {-1, 1, -1},  /* quat_src 后独立修正训练极性 */
         },
@@ -79,7 +82,9 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
         .imu = {
             .eul_src   = {1, 0, 2},
             .eul_sign  = {-1,-1, -1},
+            .gyr_src   = {0, 1, 2},
             .gyr_sign  = {-1,-1, -1},
+            .acc_src   = {0, 1, 2},
             .acc_sign  = {-1, 1, -1},
             .quat_src  = {0, 1, 2},
             .quat_sign = {-1, 1, -1},

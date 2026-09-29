@@ -84,7 +84,7 @@ HISTORY 也是准确复算策略所必需的同步机制。首次实现应一并
 
 现有 `Vofa_Send()` 最大 32 通道，不能承载本协议。诊断模式用以下协议替换同一遥测传输口上的普通 VOFA 输出；文本 printf、32 路 JustFloat 和本协议不要交错发送。本实现保留 `s2r_diagnostic_requested=0` 待机调试回退入口；发送口空闲且电机失能、无策略会话时才切换。无串口切换命令。
 
-诊断流与 `Vofa_Send()` 共用遥测传输口，上电默认是机器表 `MACHINE_VOFA_PORT` 指定的 UART，运行时可切到板载 USB CDC（内部 DMA，Full Speed PHY）。UART 配置为 **1152000 baud、8N1**；USB CDC 的同名 line coding 只用于虚拟 COM 口设置，不决定 USB 物理速率。META 的 `transport` 报告实际路径，`uart`/`baud` 保留 UART 回退配置。本协议所有整数和 IEEE-754 float32 使用小端；按字段显式序列化，不直接发送有编译器填充的 C struct。
+诊断流与 `Vofa_Send()` 共用遥测传输口，上电默认是机器表 `MACHINE_VOFA_PORT` 指定的 UART；板载 USB CDC（内部 DMA，Full Speed PHY）留作后续有线测试。UART 配置为 **1152000 baud、8N1**；USB CDC 的同名 line coding 只用于虚拟 COM 口设置，不决定 USB 物理速率。META 的 `transport` 报告实际路径，`uart`/`baud` 保留 UART 配置。本协议所有整数和 IEEE-754 float32 使用小端；按字段显式序列化，不直接发送有编译器填充的 C struct。
 
 固定头部 40 字节，随后载荷，最后 4 字节 CRC：
 
@@ -131,6 +131,7 @@ CRC 使用 CRC-32/ISO-HDLC：poly=`0x04C11DB7`，反射实现 poly=`0xEDB88320`�
 - CONTROL 中带 `_fw` 的量为**固件控制器实际使用的坐标**，不能误标成训练空间。META 发送 `q_train = sign * wrap(q_fw - zero)` 的 sign/zero，以及动作映射规则。
 - M6 使用固件逻辑电机正方向，发送/反馈都按同一极性校正，并明确角度/速度/力矩是在电机轴还是减速器输出轴。CAN ID、左右交叉接线和减速比写入 META。
 - 四元数统一序列 `[w,x,y,z]`。IMU 原始空间保留设备定义；变换后的 `quat_body` 定义为机体到世界旋转，世界 +z 向上。若源接口方向相反，先转换并在 META 记录转换规则。
+- META 的 `imu.gyro_src` / `imu.acc_src` 按输出 X/Y/Z 列出原始角速度/加速度通道下标，`imu.gyro_sign` / `imu.acc_sign` 是取源后乘的符号；按当前机器表发送，轴向正确性待台架核对。
 - 本机器人训练前向为机体 **+x**。不要套用 imcawl 的 +y 约定。
 - 角度 rad，角速度 rad/s，力矩 N·m，电流 A，加速度 m/s²，时间 μs；编码器原始值、DJI raw 电流单独声明换算，不与 SI 值混写。
 
@@ -304,7 +305,7 @@ motor_clamp_or_mask, virtual_clamp_or_mask, telemetry_generated_total
 
 ## 9. 带宽与快照实现
 
-UART 回退路径的 8N1 每字节占 10 bit，1152000 baud 的理论载荷能力为 **115200 B/s**；USB CDC 路径不使用这个线速预算。
+UART8 路径的 8N1 每字节占 10 bit，1152000 baud 的理论载荷能力为 **115200 B/s**；USB CDC 路径不使用这个线速预算。
 
 按固定帧头+CRC 44 字节计算：
 
@@ -387,7 +388,7 @@ UART 回退路径的 8N1 每字节占 10 bit，1152000 baud 的理论载荷能�
 
 > 本分支是**去耦采样**实现（变更 104）：`imcalib/Telemetry/` 只读现有固件状态，任务层唯一挂点是 `commTask` 末的 `S2R_Pump()`。因此本节逐条给出与"内环直采"版本的差别；某字段是否可用，以 META 的 `unavailable` / `derived` 两栏和本文为准。
 
-- UART 回退口的 CubeMX `.ioc` 与生成初始化仍为 **1152000、8N1**；默认遥测走机器表指定的 UART8，USB CDC 保留为可选传输，UART7/9 保持原用途。策略投入方式（左上挡 + 右中位）沿用代码，本分支没有既有 `infer_enable` 字段。
+- UART8 的 CubeMX `.ioc` 与生成初始化仍为 **1152000、8N1**；默认遥测走 UART8，板载 USB CDC 留作后续有线测试，UART7/9 保持原用途。策略投入方式（左上挡 + 右中位）沿用代码，本分支没有既有 `infer_enable` 字段。
 - `boot_id` 使用 H723 RNG + HSI48；启动失败时 `s2r_init_error & 1`，新协议不输出伪造启动编号。仅影响诊断初始化，不更改电机门控。META 编码越界置 bit1。RNG 初始化参考 [ST 官方 HAL](https://github.com/STMicroelectronics/stm32h7xx-hal-driver/blob/master/Src/stm32h7xx_hal_rng.c)，实际随机源启动与复位唯一性待台架确认。本分支首次 `S2R_Pump()` 触发自初始化（`main.c` 不参与），所以 META 首片出现在 commTask 启动后 10 拍内。
 - `control_seq` 是采样拍计数（commTask 1 kHz），不是内环计数；`obs_seq/history_seq/policy_seq` 在会话开始重置，分别在采样观测、历史就绪和观测到一次推理时递增。反复无效观测不重复创建空会话（`History_Reset` 只在曾 STARTED/有历史时轮转会话段）。
 - **策略绑定**：模块自己维护 `published_seq`（成功推理序号）。`used_policy_seq` 在"RL 已投入 + 动作新鲜"时填该序号，否则填 0；因此 CONTROL 与 POLICY 的对应关系不依赖既有结构体字段。`POLICY_START` 发生在推理成功并被采样到之后，`POLICY_ACTIVE` 由同一条件在本拍末尾更新。

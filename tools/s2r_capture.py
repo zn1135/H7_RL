@@ -235,7 +235,7 @@ class Exporter:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     source = ap.add_mutually_exclusive_group(required=True)
-    source.add_argument("--port", help="USB serial device, e.g. /dev/ttyUSB0 or COM5")
+    source.add_argument("--port", help="UART8 adapter or USB CDC serial device, e.g. /dev/ttyUSB0 or COM5")
     source.add_argument("--input", type=Path, help="decode an existing raw.bin")
     ap.add_argument("--output", type=Path, required=True, help="new output directory")
     ap.add_argument("--baud", type=int, default=1152000)

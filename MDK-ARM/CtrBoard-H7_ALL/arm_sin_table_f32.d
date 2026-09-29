@@ -1,0 +1,9 @@
+ctrboard-h7_all\arm_sin_table_f32.o: ../imcalib/user-lib/arm_sin_table_f32.c
+ctrboard-h7_all\arm_sin_table_f32.o: ../imcalib/user-lib/../../Drivers/CMSIS/DSP/Include/arm_math.h
+ctrboard-h7_all\arm_sin_table_f32.o: ../Drivers/CMSIS/Include/cmsis_compiler.h
+ctrboard-h7_all\arm_sin_table_f32.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\stdint.h
+ctrboard-h7_all\arm_sin_table_f32.o: ../Drivers/CMSIS/Include/cmsis_armcc.h
+ctrboard-h7_all\arm_sin_table_f32.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\string.h
+ctrboard-h7_all\arm_sin_table_f32.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\math.h
+ctrboard-h7_all\arm_sin_table_f32.o: D:\keil\keil_core\ARM\armcc_5\Bin\..\include\float.h
+ctrboard-h7_all\arm_sin_table_f32.o: ../imcalib/user-lib/../../Drivers/CMSIS/DSP/Include/arm_common_tables.h

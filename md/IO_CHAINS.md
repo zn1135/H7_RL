@@ -32,8 +32,8 @@ task_imu.c: imu_task_body() @ 约 1kHz (imuTask osDelay(1))
                     (输出 X/Y/Z 各自先经 quat_src 选模块通道, 再乘 quat_sign, task_imu.c)
       euler_deg[3]  按机体 俯仰/横滚/偏航 序: eul_sign[i] × raw.eul[eul_src[i]]
       euler_rad[3]  euler_deg × DEG2RAD (Attitude_Update)
-      gyro_rad_s[3] gyr_sign × raw × DEG2RAD (只做符号; 存序为机体 X/Y/Z)
-      acc_g[3]      acc_sign × raw (G, 只做符号)
+      gyro_rad_s[3] 按机体 X/Y/Z 序: gyr_sign[i] × raw.gyr[gyr_src[i]] × DEG2RAD
+      acc_g[3]      按机体 X/Y/Z 序: acc_sign[i] × raw.acc[acc_src[i]] (G)
       online        HI229_Online() 且四元数归一化成功
     │
     ▼
@@ -58,12 +58,14 @@ task_imu.c: imu_task_body() @ 约 1kHz (imuTask osDelay(1))
 |------|------|:---:|
 | eul_src[3] | 机体 俯仰/横滚/偏航 各取模块哪一路（0 Roll / 1 Pitch / 2 Yaw） | {1, 0, 2}（轴不换） |
 | eul_sign[3] | 欧拉角符号，同序 | {+1, −1, −1} |
-| gyr_sign[3] | 角速度符号，模块 X/Y/Z | {−1, +1, −1} |
-| acc_sign[3] | 加速度符号，模块 X/Y/Z | {−1, +1, −1} |
+| gyr_src[3] | 机体 X/Y/Z 各取模块哪一路（0 X / 1 Y / 2 Z）；2026-09-29 大机新增通道映射，小机恒等映射 | 旧记录无此字段 |
+| gyr_sign[3] | 角速度符号，映射后 X/Y/Z | {−1, +1, −1} |
+| acc_src[3] | 机体 X/Y/Z 各取模块哪一路（0 X / 1 Y / 2 Z）；两机新增恒等映射，供台架调整 | 旧记录无此字段 |
+| acc_sign[3] | 加速度符号，映射后 X/Y/Z | {−1, +1, −1} |
 | quat_src[3] | 四元数输出 X/Y/Z 各取模块哪一路 | 见 machine_config.c |
 | quat_sign[3] | 四元数 X/Y/Z 符号（quat_src 之后独立施加） | {−1, +1, −1} |
 
-四组符号对应"模块绕 Y 轴装反 180°"，彼此一致（历史说明；与当前机器表不一致处以代码为准、待台架复核）。大机器表为独立一组值（见 `machine_config.c`），与早期"暂填同值"的记录不同，待作者确认。注意 `imu_state` 欧拉角按 `ATTITUDE_PITCH=0 / ROLL=1 / YAW=2` 存，角速度按机体 X/Y/Z 存，两者顺序不同。
+四组符号对应"模块绕 Y 轴装反 180°"，彼此一致（历史说明；与当前机器表不一致处以代码为准、待台架复核）。大机器表为独立一组值（见 `machine_config.c`），与早期"暂填同值"的记录不同，待作者确认。注意 `imu_state` 欧拉角按 `ATTITUDE_PITCH=0 / ROLL=1 / YAW=2` 存，角速度和加速度按机体 X/Y/Z 存，两者顺序不同。2026-09-29 曾按作者要求为大机角速度加 X/Y 来源互换，作者随后自行调整，现值以机器表为准；小机保持原样，物理轴向仍待台架验证。加速度来源通道初始为恒等映射，供作者台架调整。
 
 ---
 
@@ -653,11 +655,11 @@ policyTask → rl_control.observation/policy    │  只读
 actuationTask → rl_control.torque_state       │        │
                 rl_output_dm/wheel_cmd_nm     ─┘        ▼
 commTask → S2R_Pump() ─► s2r_telemetry.c (成帧/CRC/队列) ─► USB CDC DMA / UART DMA
-             └ 返回 0 时走 VOFA，旧布局与策略追踪由 vofa_trace_requested 选择
+             └ 返回 0 时走 VOFA，普通布局与策略追踪由 vofa_trace_requested 选择
 ```
 
 - **采样层 `s2r_source.c`**：`policy.run_ok+run_fail` 变化 → 一次推理；`hi229_data.ts`/`last_rx_tick` 变化 → IMU 新帧；`dm/dji_motor_feedback[].last_rx_tick` 变化 → 电机新帧。序号（`state/imu/policy/control`）与时间戳全部由模块自维护。
 - **成帧层 `s2r_telemetry.c`**：POLICY 每次推理、CONTROL 100 Hz（10 ms 抽样）、IMU 最快 50 Hz、HISTORY 2 Hz、HEALTH 10 Hz、META 分片限速 300 ms；队列 24 槽，控制侧不等串口。
 - **链路口径**（本分支未插桩处一律写 NaN/0，不伪造）：`action_raw`、`tau_virtual_raw_fw`、`gas_tau_shank_fw`、`tau_motor_unclipped`、`current_motor` = NaN；`motor_send_ok_mask`/`can_enqueue_us` = 0；`*_rx_us` 是 commTask 首次见到新帧的时刻（1 ms 量化）；`motor_clamp_or_mask` 由请求饱和推导。META 的 `unavailable` / `derived` 两栏即这份清单。
-- **当前默认**：`S2R_DIAGNOSTIC_DEFAULT=0`，机器表指定的 UART8 发送 100 Hz 策略观测/IMU/历史 VOFA 追踪，见 [vofa_policy_trace.md](vofa_policy_trace.md)。失能且发送完成时写 `vofa_trace_requested=0` 可切到约 50 Hz 的旧在线诊断布局；写 `s2r_diagnostic_requested=1` 可在失能、无会话、发送完成后切到 S2R。`vofa_transport.requested=0` 可在失能、S2R 退出后切到 USB CDC，写 1 返回 UART；详见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。`s2r_init_error` bit0 = 启动 RNG/boot_id 失败，bit1 = META 缓冲溢出。
+- **当前默认**：`S2R_DIAGNOSTIC_DEFAULT=0`、`vofa_trace_requested=0`，机器表指定的 UART8 发送固定通道普通 VOFA JustFloat，VOFA+ 可直接保存 CSV，见 [vofa_policy_trace.md](vofa_policy_trace.md)。失能且发送完成时写 `vofa_trace_requested=1` 可切到多帧型策略追踪；写 `s2r_diagnostic_requested=1` 可在失能、无会话、发送完成后切到 S2R1 二进制流。`vofa_transport.requested=0` 可在 S2R 退出后切到 USB CDC，写 1 返回 UART8；详见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。`s2r_init_error` bit0 = 启动 RNG/boot_id 失败，bit1 = META 缓冲溢出。
 - **构建**：两份工程都已登记 `imcalib/Telemetry`；`.s2r_dma` 在 AXI SRAM，USB 可写对象由链接配置放入 `0x2404C000` 起的 16 KiB 非缓存区。改源码后先 `python tools/s2r_build_info.py` 再编译，并核对 map，见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。
