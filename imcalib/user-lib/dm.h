@@ -52,6 +52,8 @@ typedef struct {
     volatile uint8_t  raw_pending;
     volatile uint8_t  rx_seen;
     volatile uint32_t last_rx_tick;
+    volatile uint64_t last_rx_ns;
+    uint64_t parsed_rx_ns;
 } dm_motor_feedback_t;
 
 extern const dm_motor_config_t dm_motor_config[DM_MOTOR_NUM];

@@ -11,12 +11,15 @@
 #include "task.h"
 #include "../Telemetry/s2r_telemetry.h"
 #include "../Telemetry/vofa_trace.h"
+#include "../Telemetry/joint_usb.h"
+#include "usbd_cdc_if.h"
 
 #include <math.h>
 
 /* 更新电机状态 */
 static void Motor_State_Update(void)
 {
+    vTaskSuspendAll();
     for (uint8_t i = 0u; i < DM_MOTOR_NUM; i++)
     {
         const dm_motor_feedback_t *feedback = &dm_motor_feedback[i];
@@ -26,8 +29,10 @@ static void Motor_State_Update(void)
         motor_state.dm.vel_rad_s[i] = feedback->vel_rad_s;
         motor_state.dm.trq_nm[i] = feedback->trq_nm;
         motor_state.dm.last_rx_tick[i] = feedback->last_rx_tick;
+        motor_state.dm.parsed_rx_ns[i] = feedback->parsed_rx_ns;
         motor_state.dm.online[i] = (uint8_t)Dm_Is_Online(i);
     }
+    (void)xTaskResumeAll();
     for (uint8_t i = 0u; i < DJI_MOTOR_NUM; i++)
     {
         const dji_motor_feedback_t *feedback = &dji_motor_feedback[i];
@@ -164,6 +169,10 @@ static void Robot_Enable_Update(void)
 
     enable_request = (uint8_t)(robot_state.rc_enable
         && ctrl_fault == FAULT_NONE && !robot_state.fallen);
+    if (JointUsb_ModeLock())
+    {
+        enable_request = JointUsb_EnableAllowed();
+    }
     if (enable_request && !robot_state.motor_enabled)
     {
         robot_state.motor_enabled = 1u;
@@ -318,9 +327,19 @@ void comm_task_body(void)
     Leg_State_Update();
     WS2812_RainbowBlink();
     Remote_Control_Update();
+    if (CDC_Configured_HS())
+    {
+        vofa_transport.requested = VOFA_TRANSPORT_UART;
+        if (Vofa_Transport_Update((uint8_t)!robot_state.motor_enabled))
+        {
+            Vofa_Trace_Discard();
+        }
+    }
+    JointUsb_Process();
     Robot_Fallen_Update();
     Robot_Fault_Update();
     Robot_Enable_Update();
+    JointUsb_Pump();
     /* 同口互斥：S2R > 策略 VOFA > 普通 VOFA；切换条件见 md/vofa_policy_trace.md。 */
     s2r_active = S2R_Pump();
     if (s2r_active)

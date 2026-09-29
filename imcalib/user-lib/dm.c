@@ -1,5 +1,6 @@
 #include "dm.h"
 #include "machine_config.h"
+#include "mono_ns.h"
 #include <string.h>
 #include <math.h>
 
@@ -96,6 +97,7 @@ static void Dm_Read(void *ctx, uint32_t id, const uint8_t *data, uint8_t dlc)
         feedback->raw_data[i] = data[i];
     }
     feedback->last_rx_tick = HAL_GetTick();
+    feedback->last_rx_ns = Mono_Ns_Get();
     feedback->rx_seen = 1u;
     feedback->raw_pending = 1u;
 }
@@ -132,6 +134,7 @@ void Dm_Parse(void)
         dm_motor_feedback_t *feedback = &dm_motor_feedback[i];
         uint8_t raw_data[8];
         uint32_t primask;
+        uint64_t rx_ns;
 
         if (!feedback->raw_pending)
         {
@@ -141,6 +144,7 @@ void Dm_Parse(void)
         primask = __get_PRIMASK();
         __disable_irq();
         memcpy(raw_data, (const void *)feedback->raw_data, sizeof(raw_data));
+        rx_ns = feedback->last_rx_ns;
         feedback->raw_pending = 0u;
         __set_PRIMASK(primask);
 
@@ -168,6 +172,7 @@ void Dm_Parse(void)
         feedback->trq_nm = Dm_Uint_To_Float(feedback->trq_raw,
             -machine->dm_trq_max, machine->dm_trq_max, 12u);
         Dm_Update_Angle(i);
+        feedback->parsed_rx_ns = rx_ns;
     }
 }
 

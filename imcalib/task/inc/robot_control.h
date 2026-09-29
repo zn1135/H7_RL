@@ -22,6 +22,7 @@ typedef enum {
     CTRL_STRATEGY_RL = 0,       /* RL 推理 */
     CTRL_STRATEGY_LQR,          /* LQR 平衡 */
     CTRL_STRATEGY_DISABLE,      /* 左下 / 离线 */
+    CTRL_STRATEGY_JOINT_USB,    /* USB 台架 */
 } ctrl_strategy_t;
 
 typedef struct {
@@ -30,6 +31,7 @@ typedef struct {
     float vel_rad_s[DM_MOTOR_NUM];
     float trq_nm[DM_MOTOR_NUM];
     uint32_t last_rx_tick[DM_MOTOR_NUM];
+    uint64_t parsed_rx_ns[DM_MOTOR_NUM];
     uint8_t online[DM_MOTOR_NUM];
 } dm_motor_state_t;
 

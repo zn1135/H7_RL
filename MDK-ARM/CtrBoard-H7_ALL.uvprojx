@@ -1331,6 +1331,11 @@
               <FileType>1</FileType>
               <FilePath>../imcalib/Telemetry/vofa_trace.c</FilePath>
             </File>
+            <File>
+              <FileName>joint_usb.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/Telemetry/joint_usb.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

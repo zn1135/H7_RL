@@ -1,5 +1,7 @@
 # 下位机 sysid 实施计划（轮 + 闭链腿）
 
+> **历史资料，当前不可按此操作。** 旧 `imcalib/Sysid/` 固件模块已移除。现行 USB CDC 关节映射与辨识见 [新流程](../joint-usb-sysid.md)。
+
 > 大机器测试专用，`SYSID_ENABLE=1` 时生效。
 
 > **上游文档**：`chuanliantui-wheel-joint-sysid-handoff.md`（算法侧交接单，定义要采什么）

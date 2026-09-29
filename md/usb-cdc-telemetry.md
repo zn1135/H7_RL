@@ -1,5 +1,7 @@
 # USB CDC 遥测发送（MC02H7）
 
+> 当前新增独立的关节 USB 双向试验协议，详见 [joint-usb-sysid.md](joint-usb-sysid.md)。本页描述原 VOFA/S2R 遥测发送路径及历史上机结果。
+
 当前工程的 USB_OTG_HS 使用 PA11/PA12 和内置 Full Speed PHY，USB 链路为 12 Mbps；没有切到外部 ULPI High Speed PHY。VOFA 与 S2R 共用传输选择器，当前上电默认走机器表指定的 UART8；板载 USB CDC 留作后续有线测试。保持原来的 S2R > 策略 VOFA > 旧 VOFA 互斥顺序。VOFA 帧和 S2R1 帧格式不变，两种格式不能混在同一次采集文件中。
 
 ## 发送与切换

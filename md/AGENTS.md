@@ -175,6 +175,7 @@ CtrBoard-H7_ALL/
     ├── sim2real_serial_protocol.md ← S2R1 诊断遥测协议 (帧布局/字段语义)
     ├── sim2real_serial_capture.md  ← 接线 + 采集 + 验收清单
     ├── sysid-change-map.md  ← 每处改动的输入/输出/调用链
+    ├── joint-usb-sysid.md   ← 当前 USB 关节映射与辨识流程
     └── sysid/               ← 大机器测试历史文档（固件测试模块已移除）
         ├── sysid-lower-machine-plan.md
         ├── sysid-delivery.md

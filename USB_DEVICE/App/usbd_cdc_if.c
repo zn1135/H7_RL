@@ -23,6 +23,7 @@
 
 /* USER CODE BEGIN INCLUDE */
 #include <string.h>
+#include "joint_usb.h"
 
 /* USER CODE END INCLUDE */
 
@@ -97,6 +98,14 @@ uint8_t UserTxBufferHS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
 static uint8_t cdc_line_coding[7] = {0x00u, 0x94u, 0x11u, 0x00u, 0u, 0u, 8u};
+volatile struct {
+  uint32_t rx_packets;
+  uint32_t rx_bytes;
+  uint32_t tx_submit;
+  uint32_t tx_busy;
+  uint32_t tx_fail;
+  uint32_t tx_done;
+} joint_usb_cdc_debug;
 
 /* USER CODE END PRIVATE_VARIABLES */
 
@@ -276,6 +285,16 @@ static int8_t CDC_Control_HS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_HS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 11 */
+  if (Buf != NULL && Len != NULL && *Len <= APP_RX_DATA_SIZE)
+  {
+    joint_usb_cdc_debug.rx_packets++;
+    joint_usb_cdc_debug.rx_bytes += *Len;
+    JointUsb_RxIsr(Buf, *Len);
+  }
+  else
+  {
+    JointUsb_RxOverflowIsr();
+  }
   USBD_CDC_SetRxBuffer(&hUsbDeviceHS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceHS);
   return (USBD_OK);
@@ -296,14 +315,24 @@ uint8_t CDC_Transmit_HS(uint8_t* Buf, uint16_t Len)
   USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceHS.pClassData;
   if (Buf == NULL || Len == 0u || hUsbDeviceHS.dev_state != USBD_STATE_CONFIGURED || hcdc == NULL)
   {
+    joint_usb_cdc_debug.tx_fail++;
     return USBD_FAIL;
   }
   if (hcdc->TxState != 0u)
   {
+    joint_usb_cdc_debug.tx_busy++;
     return USBD_BUSY;
   }
   USBD_CDC_SetTxBuffer(&hUsbDeviceHS, Buf, Len);
   result = USBD_CDC_TransmitPacket(&hUsbDeviceHS);
+  if (result == USBD_OK)
+  {
+    joint_usb_cdc_debug.tx_submit++;
+  }
+  else
+  {
+    joint_usb_cdc_debug.tx_fail++;
+  }
   /* USER CODE END 12 */
   return result;
 }
@@ -327,6 +356,7 @@ static int8_t CDC_TransmitCplt_HS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
+  joint_usb_cdc_debug.tx_done++;
   /* USER CODE END 14 */
   return result;
 }
@@ -354,6 +384,12 @@ uint8_t CDC_Transmit_Idle_HS(void)
   }
   hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceHS.pClassData;
   return (uint8_t)(hcdc == NULL || hcdc->TxState == 0u);
+}
+
+uint8_t CDC_Configured_HS(void)
+{
+  return (uint8_t)(hUsbDeviceHS.dev_state == USBD_STATE_CONFIGURED
+      && hUsbDeviceHS.pClassData != NULL);
 }
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */

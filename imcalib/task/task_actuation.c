@@ -3,6 +3,8 @@
 #include "dm.h"
 #include "dji.h"
 #include "tim.h"
+#include "mono_ns.h"
+#include "joint_usb.h"
 
 /*
  * 输出任务三层结构 (作者 2026-09-22 定: 解算只算, 分发唯一):
@@ -89,6 +91,11 @@ uint8_t strategy_rc_enable(const rc_command_t *cmd)
 /* 左拨杆选模式: 先看 rc_enable(唯一判定), 再按挡位给策略 */
 static ctrl_strategy_t strategy_from_remote(const rc_command_t *cmd)
 {
+    if (JointUsb_ModeLock())
+    {
+        return JointUsb_PhysicalPermit()
+            ? CTRL_STRATEGY_JOINT_USB : CTRL_STRATEGY_DISABLE;
+    }
     if (!robot_state.rc_enable)
     {
         return CTRL_STRATEGY_DISABLE;
@@ -220,6 +227,11 @@ void output_task_body(void)
         }
         break;
 
+    case CTRL_STRATEGY_JOINT_USB:
+        lqr_idle();
+        JointUsb_Compute(&torque);
+        break;
+
     case CTRL_STRATEGY_DISABLE:
     default:
         lqr_idle();
@@ -227,5 +239,13 @@ void output_task_body(void)
     }
 
     /* 3 分发: 唯一出口 */
-    output_dispatch(&torque);
+    {
+        uint64_t queue_ns = Mono_Ns_Get();
+
+        output_dispatch(&torque);
+        if (JointUsb_ModeLock() || JointUsb_StreamRequested())
+        {
+            JointUsb_ActuationTick(&torque, queue_ns, output_debug_dm_sent);
+        }
+    }
 }

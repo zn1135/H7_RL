@@ -1,5 +1,7 @@
 # chuanliantui 轮与闭链腿系统辨识交接
 
+> **历史资料，当前不可按此操作。** 现行关节 USB 测试见 [新流程](../joint-usb-sysid.md)。
+
 > 大机器测试专用，`SYSID_ENABLE=1` 时生效。
 
 > 给下位机：采原始数据；给算法：在 MuJoCo 回放同一力矩输入，拟合 sim2real。
