@@ -17,24 +17,24 @@
 #define S2R_ACTION_NUM      6u
 #define S2R_LATENT_NUM      3u
 
-/* 调试器回退: 0 → 待机切回旧 VOFA (仅电机失能、无会话、UART 就绪时生效) */
+/* 调试器回退: 0 → 待机切回策略 VOFA (仅电机失能、无会话、发送完成时生效) */
 extern volatile uint8_t s2r_diagnostic_requested;
 extern volatile uint32_t s2r_init_error;    /* bit0 启动 RNG 失败, bit1 META 溢出 */
 
-/* 烧录默认值: 0 = 上电发策略 VOFA; 1 = 上电由 S2R1 占口。
- * 旧 VOFA 布局可通过 vofa_trace_requested=0 在失能时切换。 */
+/* 烧录默认值: 0 = 上电发 VOFA; 1 = 上电由 S2R1 占口。
+ * VOFA 布局由 vofa_trace_requested 选择，当前上电默认为策略追踪。 */
 #ifndef S2R_DIAGNOSTIC_DEFAULT
 #define S2R_DIAGNOSTIC_DEFAULT 0u
 #endif
 
 /* ============================================================================
  * 速率档: 描述性遥测不需要 100 Hz 时的限流档 (采样仍在 commTask 1 kHz 跑)
- *   0 = 原设定   (待机 ≈58 kB/s, 投入 ≈85 kB/s; 需真 USB-TTL CH340/FT232)
- *   1 = 低速     (≈9.5 kB/s; 实测待机 40 s 零丢帧, 但贴着台架串口桥的天花板)
- *   2 = 稳健     (≈4.3 kB/s; 台架桥留 2 倍余量, 推荐)
+ *   0 = 原设定   (待机 ≈58 kB/s, 投入 ≈85 kB/s)
+ *   1 = 低速     (≈9.5 kB/s)
+ *   2 = 稳健     (≈4.3 kB/s; USB CDC 首轮仍用此档)
  *   3 = 极低     (≈1.6 kB/s; 只验链路/看趋势)
  * 实测: 同一条 PowerDebugger (VID 303A) 桥, 6.25 kB/s 干净, 33.6 kB/s 丢一半字节,
- * 所以台架采集请留余量; 换真 USB-TTL 后改回 0。
+ * 板载 USB CDC 需重新实测, 不沿用串口桥结果。
  * ==========================================================================*/
 #ifndef S2R_RATE_LOW
 #define S2R_RATE_LOW   2u
@@ -100,9 +100,8 @@ extern volatile uint32_t s2r_init_error;    /* bit0 启动 RNG 失败, bit1 META
 #define S2R_RECORD_BYTES        (192u * 1024u)  /* AXI SRAM 内缓存 (≈4 s @100 Hz) */
 #define S2R_RECORD_PERIOD_US    10000u          /* 录制采样周期: md 的 100 Hz */
 #define S2R_DUMP_PERIOD_US      150000u         /* 回放节流: ≈3.1 kB/s, 留足链路余量 */
-/* 帧间强制空隙: 每帧发完后至少空这么久再发下一帧。
- * 台架实测: 队列有积压时固件会以线速连着推好几帧, 串口桥缓冲溢出 → 0.9 的帧丢掉;
- * 留出空隙后瞬时速率被压到 ~85 kB/s, 远低于线速但足够本项目所有档位。 */
+/* 帧间强制空隙: UART 回退历史曾因积压突发使串口桥溢出;
+ * USB CDC 首轮仍沿用 UART 发送时间估算和此空隙, 待实测后再调整。 */
 #ifndef S2R_TX_GAP_US
 #define S2R_TX_GAP_US           1500u
 #endif

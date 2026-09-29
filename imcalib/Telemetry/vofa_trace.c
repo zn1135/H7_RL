@@ -186,7 +186,7 @@ uint8_t Vofa_Trace_Pump(void)
 
     desired = vofa_trace_requested ? 1u : 0u;
     if (desired != trace_enabled && !robot_state.motor_enabled
-        && (VOFA_UART)->gState == HAL_UART_STATE_READY)
+        && Vofa_Transport_Idle())
     {
         trace_enabled = desired;
         Vofa_Trace_Discard();

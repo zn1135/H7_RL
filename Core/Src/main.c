@@ -71,6 +71,48 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void USB_Dma_Memory_Init(void)
+{
+#if defined(__GNUC__)
+  extern uint32_t _siusb_data, _susb_data, _eusb_data;
+  extern uint32_t _susb_bss, _eusb_bss;
+  uint32_t *source;
+  uint32_t *target;
+
+  source = &_siusb_data;
+  target = &_susb_data;
+  while (target < &_eusb_data)
+  {
+    *target++ = *source++;
+  }
+  target = &_susb_bss;
+  while (target < &_eusb_bss)
+  {
+    *target++ = 0u;
+  }
+#endif
+}
+
+static void USB_Dma_MPU_Config(void)
+{
+  MPU_Region_InitTypeDef region = {0};
+
+  HAL_MPU_Disable();
+  region.Enable = MPU_REGION_ENABLE;
+  region.Number = MPU_REGION_NUMBER0;
+  region.BaseAddress = 0x2404C000u;
+  region.Size = MPU_REGION_SIZE_16KB;
+  region.SubRegionDisable = 0u;
+  region.TypeExtField = MPU_TEX_LEVEL1;
+  region.AccessPermission = MPU_REGION_FULL_ACCESS;
+  region.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
+  region.IsShareable = MPU_ACCESS_SHAREABLE;
+  region.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
+  region.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+  HAL_MPU_ConfigRegion(&region);
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+}
+
 static void Machine_Apply_Fdcan_Data_Timing(FDCAN_HandleTypeDef *handle)
 {
   if (handle->Init.DataPrescaler != MACHINE_FDCAN13_DATA_PRESCALER
@@ -102,6 +144,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  USB_Dma_Memory_Init();
+  USB_Dma_MPU_Config();
 
   /* USER CODE END 1 */
 
@@ -305,3 +349,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+

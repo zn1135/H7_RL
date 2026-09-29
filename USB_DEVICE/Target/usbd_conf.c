@@ -92,6 +92,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
     HAL_NVIC_SetPriority(OTG_HS_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(OTG_HS_IRQn);
   /* USER CODE BEGIN USB_OTG_HS_MspInit 1 */
+    pcdHandle->Init.dma_enable = ENABLE;
 
   /* USER CODE END USB_OTG_HS_MspInit 1 */
   }

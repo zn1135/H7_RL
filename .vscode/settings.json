@@ -1,4 +1,3 @@
 {
-    "EIDE.ARM.GCC.InstallDirectory": "../../.local/opt/arm-none-eabi/usr",
     "EIDE.ARM.GCC.Prefix": "arm-none-eabi-"
 }

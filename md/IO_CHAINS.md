@@ -652,12 +652,12 @@ policyTask → rl_control.observation/policy    │  只读
              action_state / input_command     ├─► s2r_source.c  (采样 + 变化检测)
 actuationTask → rl_control.torque_state       │        │
                 rl_output_dm/wheel_cmd_nm     ─┘        ▼
-commTask → S2R_Pump() ─► s2r_telemetry.c (成帧/CRC/队列) ─► VOFA_UART DMA 1152000 8N1
-             └ 返回 0 时走 vofa_trace.c 策略 VOFA，或切到旧 32 路 VOFA
+commTask → S2R_Pump() ─► s2r_telemetry.c (成帧/CRC/队列) ─► USB CDC DMA / UART DMA
+             └ 返回 0 时走 VOFA，旧布局与策略追踪由 vofa_trace_requested 选择
 ```
 
 - **采样层 `s2r_source.c`**：`policy.run_ok+run_fail` 变化 → 一次推理；`hi229_data.ts`/`last_rx_tick` 变化 → IMU 新帧；`dm/dji_motor_feedback[].last_rx_tick` 变化 → 电机新帧。序号（`state/imu/policy/control`）与时间戳全部由模块自维护。
 - **成帧层 `s2r_telemetry.c`**：POLICY 每次推理、CONTROL 100 Hz（10 ms 抽样）、IMU 最快 50 Hz、HISTORY 2 Hz、HEALTH 10 Hz、META 分片限速 300 ms；队列 24 槽，控制侧不等串口。
 - **链路口径**（本分支未插桩处一律写 NaN/0，不伪造）：`action_raw`、`tau_virtual_raw_fw`、`gas_tau_shank_fw`、`tau_motor_unclipped`、`current_motor` = NaN；`motor_send_ok_mask`/`can_enqueue_us` = 0；`*_rx_us` 是 commTask 首次见到新帧的时刻（1 ms 量化）；`motor_clamp_or_mask` 由请求饱和推导。META 的 `unavailable` / `derived` 两栏即这份清单。
-- **当前默认**：`S2R_DIAGNOSTIC_DEFAULT=0`，策略 VOFA 的 100 Hz 观测/IMU/历史由 `vofa_trace.c` 打包，见 [vofa_policy_trace.md](vofa_policy_trace.md)。显式写 `s2r_diagnostic_requested=1` 可在失能、无会话、UART 就绪时切到 S2R；写回 0 返回 VOFA。需要原 500 Hz 布局时，失能且 UART 空闲把 `vofa_trace_requested` 写 0。`s2r_init_error` bit0 = 启动 RNG/boot_id 失败，bit1 = META 缓冲溢出。
-- **构建**：两份工程都已登记 `imcalib/Telemetry`；`.sct` 把 `.s2r_dma` 固定在 AXI SRAM（当前 `dma_buffer` @ `0x24001100`）。改源码后先 `python tools/s2r_build_info.py` 再编译。
+- **当前默认**：`S2R_DIAGNOSTIC_DEFAULT=0`，机器表指定的 UART8 发送 100 Hz 策略观测/IMU/历史 VOFA 追踪，见 [vofa_policy_trace.md](vofa_policy_trace.md)。失能且发送完成时写 `vofa_trace_requested=0` 可切到约 50 Hz 的旧在线诊断布局；写 `s2r_diagnostic_requested=1` 可在失能、无会话、发送完成后切到 S2R。`vofa_transport.requested=0` 可在失能、S2R 退出后切到 USB CDC，写 1 返回 UART；详见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。`s2r_init_error` bit0 = 启动 RNG/boot_id 失败，bit1 = META 缓冲溢出。
+- **构建**：两份工程都已登记 `imcalib/Telemetry`；`.s2r_dma` 在 AXI SRAM，USB 可写对象由链接配置放入 `0x2404C000` 起的 16 KiB 非缓存区。改源码后先 `python tools/s2r_build_info.py` 再编译，并核对 map，见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。

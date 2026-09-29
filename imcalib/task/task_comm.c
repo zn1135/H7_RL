@@ -6,6 +6,7 @@
 #include "can_bus.h"
 #include "machine_config.h"
 #include "Vofa_send.h"
+#include "uart_idle.h"
 #include "ws2812.h"
 #include "task.h"
 #include "../Telemetry/s2r_telemetry.h"
@@ -190,8 +191,9 @@ static void Robot_Enable_Update(void)
  * ch0 在线掩码；ch1 状态位；ch2 RL 状态位。
  * ch3~6 下发力矩 rl_output_dm_cmd_nm；ch7/8 轮力矩指令；
  * ch9~12 实测 DM 力矩；ch13~16 观测四腿角(训练空间)；
- * ch17~22 观测六关节速度；ch23~28 上次动作；ch29/30 轮电流 raw(交叉源)；
- * ch31 故障位 ctrl_fault。每两次 commTask 周期发送一次。
+ * ch17~22 观测六关节速度；ch23~28 使能后上次动作，失能时 UART9 接收诊断；
+ * ch29/30 轮电流 raw(交叉源)；
+ * ch31 故障位 ctrl_fault。每二十次 commTask 周期发送一次。
  * LQR 布局(状态 x/target/腿长/u)在下方注释里备查。
  */
 static void Robot_Control_Send_Vofa(void)
@@ -203,7 +205,7 @@ static void Robot_Control_Send_Vofa(void)
     uint16_t state_bits;
     uint32_t rl_bits;
 
-    if (++send_div < 2u)
+    if (++send_div < 20u)
     {
         return;
     }
@@ -263,6 +265,15 @@ static void Robot_Control_Send_Vofa(void)
         dbg[17u + i] = rl_control.observation.obs[RL_OBS_L_THIGH_VEL + i];
         dbg[23u + i] = rl_control.observation.obs[RL_OBS_LAST_ACTION + i];
     }
+    if (!robot_state.motor_enabled)
+    {
+        dbg[23] = (float)huart9.RxState;
+        dbg[24] = (float)hdma_uart9_rx.State;
+        dbg[25] = (float)__HAL_DMA_GET_COUNTER(&hdma_uart9_rx);
+        dbg[26] = (float)dbus_rx.dma_pos;
+        dbg[27] = (float)dbus_rx.isr_len;
+        dbg[28] = (float)dr16.last_rx_tick;
+    }
     dbg[31] = (float)ctrl_fault;   /* 0x10 = FAULT_ACTION */
 
     // dbg[31] = (float)rl_control.policy.run_us;
@@ -289,6 +300,8 @@ static void Robot_Control_Send_Vofa(void)
 /* 通信单周期 */
 void comm_task_body(void)
 {
+    uint8_t s2r_active;
+
     Dm_Parse();
     Dji_Parse();
     Motor_State_Update();
@@ -299,12 +312,20 @@ void comm_task_body(void)
     Robot_Fault_Update();
     Robot_Enable_Update();
     /* 同口互斥：S2R > 策略 VOFA > 旧力矩 VOFA；切换条件见 md/vofa_policy_trace.md。 */
-    if (S2R_Pump())
+    s2r_active = S2R_Pump();
+    if (s2r_active)
     {
         Vofa_Trace_Discard();
     }
-    else if (!Vofa_Trace_Pump())
+    else
     {
-        Robot_Control_Send_Vofa();
+        if (Vofa_Transport_Update((uint8_t)!robot_state.motor_enabled))
+        {
+            Vofa_Trace_Discard();
+        }
+        if (!Vofa_Trace_Pump())
+        {
+            Robot_Control_Send_Vofa();
+        }
     }
 }

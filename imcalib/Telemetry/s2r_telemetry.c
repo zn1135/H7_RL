@@ -920,7 +920,7 @@ static void build_meta(void)
     diag.meta_id++;
     json_append("{\"protocol_version\":1,\"firmware\":%s,", S2R_BUILD_JSON);
     json_append("\"config_id\":%lu,\"machine\":\"%s\",\"machine_id\":%u,", (unsigned long)config_id, m->name, meta_config.machine_id);
-    json_append("\"uart\":%d,\"baud\":1152000,\"format\":\"8N1\",\"policy_period_us\":%u,\"control_period_us\":%u,", (int)MACHINE_VOFA_PORT, (unsigned)(1000000u / S2R_POLICY_HZ), (unsigned)S2R_CONTROL_PERIOD_US);
+    json_append("\"transport\":\"%s\",\"usb_dma\":%s,\"uart\":%d,\"baud\":1152000,\"format\":\"8N1\",\"policy_period_us\":%u,\"control_period_us\":%u,", vofa_transport.active == VOFA_TRANSPORT_USB ? "usb_cdc" : "uart", vofa_transport.active == VOFA_TRANSPORT_USB ? "true" : "false", (int)MACHINE_VOFA_PORT, (unsigned)(1000000u / S2R_POLICY_HZ), (unsigned)S2R_CONTROL_PERIOD_US);
     json_append("\"rate_profile\":%u,\"rates_hz\":{\"POLICY\":%u,\"CONTROL\":%u,\"IMU\":%u,\"HEALTH\":%u},\"history_period_us\":%u,", (unsigned)S2R_RATE_LOW, (unsigned)S2R_POLICY_HZ, (unsigned)S2R_CONTROL_HZ, (unsigned)S2R_IMU_HZ, (unsigned)S2R_HEALTH_HZ, (unsigned)S2R_HISTORY_PERIOD_US);
     json_append("\"period_semantics\":\"policy tick from TIM6 divided by MACHINE_POLICY_DIV; all periods sampled by commTask (1 ms quantization), actual period in HEALTH\",");
     json_append("\"source\":\"imcalib/Telemetry decoupled sampler, read-only; existing control code unchanged\",");
@@ -1022,7 +1022,7 @@ uint8_t S2R_Pump(void)
     now = S2R_Now_Us();
     desired = s2r_diagnostic_requested ? 1u : 0u;
     if (desired != diag.enabled && !robot_state.motor_enabled && !diag.session
-        && (VOFA_UART)->gState == HAL_UART_STATE_READY)
+        && Vofa_Transport_Idle())
     {
         key = lock();
         queue.dropped += queue.count + (diag.pending ? 1u : 0u);
@@ -1081,7 +1081,7 @@ uint8_t S2R_Pump(void)
     {
         health(now);
     }
-    if ((VOFA_UART)->gState != HAL_UART_STATE_READY)
+    if (!Vofa_Transport_Ready())
     {
         diag.busy_total++;
         return 1u;
@@ -1102,8 +1102,7 @@ uint8_t S2R_Pump(void)
     {
         return 1u;
     }
-    Dma_Cache_Clean_Tx(dma_buffer, diag.pending_len);
-    if (HAL_UART_Transmit_DMA(VOFA_UART, dma_buffer, diag.pending_len) == HAL_OK)
+    if (Vofa_Transport_Send(dma_buffer, diag.pending_len))
     {
         diag.pending = 0u;
         /* 预计发完时刻 + 强制空隙 */

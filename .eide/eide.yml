@@ -159,7 +159,6 @@ targets:
       - USE_PWR_LDO_SUPPLY
       - ARM_MATH_CM7
       incList:
-      - ../../.local/opt/arm-none-eabi/usr/include/newlib
       - Core/Inc
       - USB_DEVICE/App
       - USB_DEVICE/Target
@@ -181,8 +180,7 @@ targets:
       - .cmsis/include
       - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
       - Drivers/CMSIS/DSP/Include
-      libList:
-      - ../../.local/opt/arm-none-eabi/usr/lib/arm-none-eabi/newlib/thumb/v7e-m+fp/hard
+      libList: []
     excludeList: []
     settings:
       debugger: cortex-debug
@@ -207,7 +205,7 @@ targets:
           global:
             $float-abi-type: hard
             arm-thumb-mode: thumb
-            misc-control: --specs=../../.local/opt/arm-none-eabi/usr/lib/arm-none-eabi/newlib/nano.specs --specs=../../.local/opt/arm-none-eabi/usr/lib/arm-none-eabi/newlib/nosys.specs
+            misc-control: --specs=nano.specs --specs=nosys.specs
             output-debug-info: enable
           linker:
             $outputTaskExcludes: []

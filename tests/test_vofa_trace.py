@@ -77,6 +77,39 @@ class VofaTraceTest(unittest.TestCase):
             self.assertEqual(len(decoded), 1)
             self.assertEqual(ignored, 1)
 
+    def test_raw_payload_tail_collision(self):
+        # A zero action followed by 65791.0 contains TAIL across float boundaries.
+        obs = frame(0, 6597, 65960179, 0, (0.0,) * 25, 65791)
+        aux = frame(1, 6597, 65960191, 0, (0.0,) * 25)
+        payload = struct.pack("<32f", *obs)
+        self.assertEqual(payload.find(TRACE.TAIL), 122)
+        for prefix in (b"", b"bad", b"noise" * 30):
+            with self.subTest(prefix_length=len(prefix)), tempfile.TemporaryDirectory() as directory:
+                raw = Path(directory) / "trace.bin"
+                raw.write_bytes(prefix + payload + TRACE.TAIL
+                                + struct.pack("<32f", *aux) + TRACE.TAIL)
+                decoded, ignored = TRACE.read_raw(raw)
+                self.assertEqual(decoded, [obs, aux])
+                self.assertEqual(ignored, len(prefix))
+
+    def test_raw_resync_after_partial_and_invalid_frames(self):
+        first = frame(0, 10, 100000, 0, (2.0,) * 25)
+        second = frame(0, 11, 110000, 0, (3.0,) * 25)
+        third = frame(1, 11, 110020, 0, (4.0,) * 25)
+        packed = lambda value: struct.pack("<32f", *value) + TRACE.TAIL
+        invalid = list(first)
+        invalid[0] = 99.0
+        damaged = packed(first)[:47] + packed(first)[54:]
+        prefix = packed(first)[71:]
+        suffix = packed(third)[:65]
+        data = prefix + packed(second) + damaged + packed(invalid) + packed(third) + suffix
+        with tempfile.TemporaryDirectory() as directory:
+            raw = Path(directory) / "trace.bin"
+            raw.write_bytes(data)
+            decoded, ignored = TRACE.read_raw(raw)
+            self.assertEqual(decoded, [second, third])
+            self.assertEqual(ignored, len(data) - 2 * 132)
+
 
 if __name__ == "__main__":
     unittest.main()

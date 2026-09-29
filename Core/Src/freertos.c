@@ -127,7 +127,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 512);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* definition and creation of commTask */
@@ -224,6 +224,7 @@ void policyTask_Entry(void const * argument)
   {
     osSemaphoreWait(policy_tick_sem_handle, osWaitForever);   /* TIM6 分频节拍 */
     ctrl_task_body();
+    // osDelay(10);
   }
   /* USER CODE END policyTask_Entry */
 }
@@ -243,6 +244,7 @@ void actuationTask_Entry(void const * argument)
   {
     osSemaphoreWait(ctrl_tick_sem_handle, osWaitForever);
     output_task_body();
+    // osDelay(1);
   }
   /* USER CODE END actuationTask_Entry */
 }

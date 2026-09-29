@@ -10,6 +10,8 @@ from pathlib import Path
 
 CHANNELS = 32
 TAIL = b"\x00\x00\x80\x7f"
+PAYLOAD_BYTES = CHANNELS * 4
+FRAME_BYTES = PAYLOAD_BYTES + len(TAIL)
 SEQ_MASK = 0xFFFFFF
 OBS_NAMES = (
     "gyro_x", "gyro_y", "gyro_z", "gravity_x", "gravity_y", "gravity_z",
@@ -57,28 +59,23 @@ def decode_header(values):
 def read_raw(path):
     data = path.read_bytes()
     cursor = 0
-    ignored = 0
     frames = []
-    while True:
-        end = data.find(TAIL, cursor)
+    while cursor + FRAME_BYTES <= len(data):
+        # Search only where a complete payload can precede the tail. An invalid
+        # candidate advances one byte, so an embedded tail cannot consume a frame.
+        end = data.find(TAIL, cursor + PAYLOAD_BYTES)
         if end < 0:
-            ignored += len(data) - cursor
             break
-        if end - cursor < CHANNELS * 4:
-            ignored += end + len(TAIL) - cursor
-            cursor = end + len(TAIL)
-            continue
-        start = end - CHANNELS * 4
-        ignored += start - cursor
+        start = end - PAYLOAD_BYTES
         values = struct.unpack("<32f", data[start:end])
         try:
             decode_header(values)
         except (ValueError, OverflowError):
-            ignored += end + len(TAIL) - start
-        else:
-            frames.append(values)
+            cursor = start + 1
+            continue
+        frames.append(values)
         cursor = end + len(TAIL)
-    return frames, ignored
+    return frames, len(data) - len(frames) * FRAME_BYTES
 
 
 def read_csv(path):
