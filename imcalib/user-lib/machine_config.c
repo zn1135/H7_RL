@@ -39,8 +39,8 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
             .gyr_sign  = {-1, 1, 1},
             .acc_src   = {1,0, 2},
             .acc_sign  = {-1, -1, -1},
-            .quat_src  = {0, 1 , 2},    /* 四元数 X/Y 通道交换; 这里只选通道 */
-            .quat_sign = {-1, 1, -1},  /* quat_src 后独立修正训练极性 */
+            .quat_src  = {1, 0, 2},    /* 四元数 X/Y 交换；轴向待烧录后复核 */
+            .quat_sign = {-1, 1, 1},  /* quat_src 后独立修正训练极性 */
         },
         /* RL 关节映射候选 A (作者 2026-09-23 定, 依据变更 97 URDF 推导):
          * lf0 = −(thigh − 2.476872), lf1 = −(vs − 3.086386), 右腿反号; 轮 sign 按训练轴/台架后退方向校正
