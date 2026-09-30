@@ -6,6 +6,7 @@
 #include "Vofa_send.h"
 #include "dma_cache.h"
 #include "s2r_build_info.h"
+#include "host_policy_usb.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -184,6 +185,7 @@ uint8_t JointUsb_EnableAllowed(void)
 
     now = Mono_Ns_Get();
     return (uint8_t)(vofa_transport.active != VOFA_TRANSPORT_USB
+        && !HostPolicy_ModeLock()
         && armed && !latched && stream_requested && limits_valid()
         && JointUsb_PhysicalPermit() && CDC_Configured_HS()
         && ctrl_fault == FAULT_NONE && !robot_state.fallen
@@ -362,7 +364,7 @@ static void command(uint8_t type, uint32_t seq, const uint8_t *payload,
         {
             ack(seq, JUSB_NO_LIMITS, rx_ns);
         }
-        else if (latched || !stream_requested || !JointUsb_PhysicalPermit()
+        else if (latched || HostPolicy_ModeLock() || !stream_requested || !JointUsb_PhysicalPermit()
                  || !CDC_Configured_HS() || vofa_transport.active == VOFA_TRANSPORT_USB)
         {
             ack(seq, JUSB_BAD_STATE, rx_ns);

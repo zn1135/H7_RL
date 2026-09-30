@@ -23,6 +23,7 @@ typedef enum {
     CTRL_STRATEGY_LQR,          /* LQR 平衡 */
     CTRL_STRATEGY_DISABLE,      /* 左下 / 离线 */
     CTRL_STRATEGY_JOINT_USB,    /* USB 台架 */
+    CTRL_STRATEGY_HOST_POLICY,  /* USB 上位机推理 */
 } ctrl_strategy_t;
 
 typedef struct {

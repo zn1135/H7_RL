@@ -1,8 +1,13 @@
 # 整机 sim2real 串口诊断数据协议 v1
 
-日期：2026-09-26。状态：**已接入源码，已完成主机协议/替身验证，待 ARM 构建与台架验收**。接线和采集步骤见 [采集说明](sim2real_serial_capture.md)。
+日期：2026-09-26。状态：**已接入源码，已完成主机协议/替身验证及 ARM GCC 临时目录编译链接，待台架验收**。接线和采集步骤见 [采集说明](sim2real_serial_capture.md)。
 
 适用：chuanliantui、25 维观测、125 维历史、6 维动作；本轮对照模型为 `model_6000_h723.onnx`。目标是定位观测、策略、控制、执行及整机动力学链路中的第一处差异。
+
+新增的 HPI1 上位机推理模式见 [host-policy-usb.md](host-policy-usb.md)：它复用本协议的
+CONTROL/IMU 采集，并在收到上位机动作时记录对应 POLICY 输入和训练空间动作。
+该模式没有板端 encoder 的 latent，POLICY.latent 记为不可用；精确的 HPI1 输入序号
+和电脑推理耗时另见上位机 `host_policy.csv`。此链路尚未真机验收。
 
 固件参考：`CtrBoard-H7_ALL`，本次核对的提交为 `3c0af0118e9108986f535ba1db346c65c2c4fd99`。实际烧录版本必须通过 META 报告，不以模型文件名代替固件版本。
 

@@ -1,151 +1,151 @@
-version: '4.1'
+version: "4.1"
 name: CtrBoard-H7_ALL
 type: ARM
 deviceName: null
 packDir: null
 srcDirs:
-- imcalib/user-lib
-- imcalib/Algorithm
-- imcalib/task
-- imcalib/Telemetry
-- imcalib/Sysid
-- X-CUBE-AI
+  - imcalib/user-lib
+  - imcalib/Algorithm
+  - imcalib/task
+  - imcalib/Telemetry
+  - imcalib/Sysid
+  - X-CUBE-AI
 virtualFolder:
   name: <virtual_root>
   files: []
   folders:
-  - name: Application
-    files: []
-    folders:
-    - name: MDK-ARM
-      files:
-      - path: Core/Startup/startup_stm32h723xx.s
-      folders: []
-    - name: User
+    - name: Application
       files: []
       folders:
-      - name: Core
-        files:
-        - path: Core/Src/main.c
-        - path: Core/Src/gpio.c
-        - path: Core/Src/freertos.c
-        - path: Core/Src/dma.c
-        - path: Core/Src/fdcan.c
-        - path: Core/Src/spi.c
-        - path: Core/Src/tim.c
-        - path: Core/Src/usart.c
-        - path: Core/Src/stm32h7xx_it.c
-        - path: Core/Src/stm32h7xx_hal_msp.c
-        - path: Core/Src/stm32h7xx_hal_timebase_tim.c
-        folders: []
-      - name: USB_DEVICE
-        files: []
-        folders:
-        - name: App
+        - name: MDK-ARM
           files:
-          - path: USB_DEVICE/App/usb_device.c
-          - path: USB_DEVICE/App/usbd_desc.c
-          - path: USB_DEVICE/App/usbd_cdc_if.c
+            - path: Core/Startup/startup_stm32h723xx.s
           folders: []
-        - name: Target
+        - name: User
+          files: []
+          folders:
+            - name: Core
+              files:
+                - path: Core/Src/main.c
+                - path: Core/Src/gpio.c
+                - path: Core/Src/freertos.c
+                - path: Core/Src/dma.c
+                - path: Core/Src/fdcan.c
+                - path: Core/Src/spi.c
+                - path: Core/Src/tim.c
+                - path: Core/Src/usart.c
+                - path: Core/Src/stm32h7xx_it.c
+                - path: Core/Src/stm32h7xx_hal_msp.c
+                - path: Core/Src/stm32h7xx_hal_timebase_tim.c
+              folders: []
+            - name: USB_DEVICE
+              files: []
+              folders:
+                - name: App
+                  files:
+                    - path: USB_DEVICE/App/usb_device.c
+                    - path: USB_DEVICE/App/usbd_desc.c
+                    - path: USB_DEVICE/App/usbd_cdc_if.c
+                  folders: []
+                - name: Target
+                  files:
+                    - path: USB_DEVICE/Target/usbd_conf.c
+                  folders: []
+            - name: X-CUBE-AI
+              files: []
+              folders:
+                - name: App
+                  files:
+                    - path: X-CUBE-AI/App/jump.c
+                    - path: X-CUBE-AI/App/jump_data.c
+                    - path: X-CUBE-AI/App/jump_data_params.c
+                    - path: X-CUBE-AI/App/pin.c
+                    - path: X-CUBE-AI/App/pin_data.c
+                    - path: X-CUBE-AI/App/pin_data_params.c
+                    - path: X-CUBE-AI/App/stable.c
+                    - path: X-CUBE-AI/App/stable_data.c
+                    - path: X-CUBE-AI/App/stable_data_params.c
+                    - path: X-CUBE-AI/App/upstairs.c
+                    - path: X-CUBE-AI/App/upstairs_data.c
+                    - path: X-CUBE-AI/App/upstairs_data_params.c
+                  folders: []
+    - name: Drivers
+      files: []
+      folders:
+        - name: STM32H7xx_HAL_Driver
           files:
-          - path: USB_DEVICE/Target/usbd_conf.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pcd.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pcd_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_ll_usb.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_hsem.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_mdma.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_exti.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_adc.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_adc_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_fdcan.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_ospi.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi_ex.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart.c
+            - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart_ex.c
           folders: []
-      - name: X-CUBE-AI
-        files: []
-        folders:
-        - name: App
+        - name: CMSIS
           files:
-          - path: X-CUBE-AI/App/jump.c
-          - path: X-CUBE-AI/App/jump_data.c
-          - path: X-CUBE-AI/App/jump_data_params.c
-          - path: X-CUBE-AI/App/pin.c
-          - path: X-CUBE-AI/App/pin_data.c
-          - path: X-CUBE-AI/App/pin_data_params.c
-          - path: X-CUBE-AI/App/stable.c
-          - path: X-CUBE-AI/App/stable_data.c
-          - path: X-CUBE-AI/App/stable_data_params.c
-          - path: X-CUBE-AI/App/upstairs.c
-          - path: X-CUBE-AI/App/upstairs_data.c
-          - path: X-CUBE-AI/App/upstairs_data_params.c
+            - path: Core/Src/system_stm32h7xx.c
           folders: []
-  - name: Drivers
-    files: []
-    folders:
-    - name: STM32H7xx_HAL_Driver
-      files:
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pcd.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pcd_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_ll_usb.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_hsem.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_mdma.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_exti.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_adc.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_adc_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_fdcan.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_ospi.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi_ex.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart.c
-      - path: Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart_ex.c
+    - name: Middlewares
+      files: []
+      folders:
+        - name: FreeRTOS
+          files:
+            - path: Middlewares/Third_Party/FreeRTOS/Source/croutine.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/event_groups.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/list.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/queue.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/stream_buffer.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/tasks.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/timers.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c
+            - path: Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c
+          folders: []
+        - name: USB_Device_Library
+          files:
+            - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c
+            - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c
+            - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c
+            - path: Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c
+          folders: []
+    - name: ::CMSIS
+      files: []
       folders: []
-    - name: CMSIS
+    - name: Doc
       files:
-      - path: Core/Src/system_stm32h7xx.c
+        - path: X-CUBE-AI/App/jump_generate_report.txt
+        - path: X-CUBE-AI/App/pin_generate_report.txt
+        - path: X-CUBE-AI/App/stable_generate_report.txt
+        - path: X-CUBE-AI/App/upstairs_generate_report.txt
       folders: []
-  - name: Middlewares
-    files: []
-    folders:
-    - name: FreeRTOS
+    - name: Lib
       files:
-      - path: Middlewares/Third_Party/FreeRTOS/Source/croutine.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/event_groups.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/list.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/queue.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/stream_buffer.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/tasks.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/timers.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c
-      - path: Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c
+        - path: Middlewares/ST/AI/Lib/GCC/STM32H7/NetworkRuntime1020_CM7_GCC.a
+        - path: Drivers/CMSIS/DSP/Lib/GCC/libarm_cortexM7lfdp_math.a
       folders: []
-    - name: USB_Device_Library
-      files:
-      - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c
-      - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c
-      - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c
-      - path: Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c
-      folders: []
-  - name: ::CMSIS
-    files: []
-    folders: []
-  - name: Doc
-    files:
-    - path: X-CUBE-AI/App/jump_generate_report.txt
-    - path: X-CUBE-AI/App/pin_generate_report.txt
-    - path: X-CUBE-AI/App/stable_generate_report.txt
-    - path: X-CUBE-AI/App/upstairs_generate_report.txt
-    folders: []
-  - name: Lib
-    files:
-    - path: Middlewares/ST/AI/Lib/GCC/STM32H7/NetworkRuntime1020_CM7_GCC.a
-    - path: Drivers/CMSIS/DSP/Lib/GCC/libarm_cortexM7lfdp_math.a
-    folders: []
 dependenceList: []
 outDir: build
 miscInfo:
@@ -154,40 +154,42 @@ targets:
   CtrBoard-H7_ALL:
     cppPreprocessAttrs:
       defineList:
-      - USE_HAL_DRIVER
-      - STM32H723xx
-      - USE_PWR_LDO_SUPPLY
-      - ARM_MATH_CM7
+        - USE_HAL_DRIVER
+        - STM32H723xx
+        - USE_PWR_LDO_SUPPLY
+        - ARM_MATH_CM7
       incList:
-      - Core/Inc
-      - USB_DEVICE/App
-      - USB_DEVICE/Target
-      - Drivers/STM32H7xx_HAL_Driver/Inc
-      - Drivers/STM32H7xx_HAL_Driver/Inc/Legacy
-      - Middlewares/Third_Party/FreeRTOS/Source/include
-      - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS
-      - Middlewares/ST/STM32_USB_Device_Library/Core/Inc
-      - Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
-      - Drivers/CMSIS/Device/ST/STM32H7xx/Include
-      - Drivers/CMSIS/Include
-      - imcalib/user-lib
-      - imcalib/Algorithm
-      - imcalib/task/inc
-      - imcalib/Telemetry
-      - imcalib/Sysid
-      - Middlewares/ST/AI/Inc
-      - X-CUBE-AI/App
-      - .cmsis/include
-      - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
-      - Drivers/CMSIS/DSP/Include
-      libList: []
+        - ../../.local/opt/arm-none-eabi/usr/include/newlib
+        - Core/Inc
+        - USB_DEVICE/App
+        - USB_DEVICE/Target
+        - Drivers/STM32H7xx_HAL_Driver/Inc
+        - Drivers/STM32H7xx_HAL_Driver/Inc/Legacy
+        - Middlewares/Third_Party/FreeRTOS/Source/include
+        - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS
+        - Middlewares/ST/STM32_USB_Device_Library/Core/Inc
+        - Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
+        - Drivers/CMSIS/Device/ST/STM32H7xx/Include
+        - Drivers/CMSIS/Include
+        - imcalib/user-lib
+        - imcalib/Algorithm
+        - imcalib/task/inc
+        - imcalib/Telemetry
+        - imcalib/Sysid
+        - Middlewares/ST/AI/Inc
+        - X-CUBE-AI/App
+        - .cmsis/include
+        - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
+        - Drivers/CMSIS/DSP/Include
+      libList:
+        - ../../.local/opt/arm-none-eabi/usr/lib/arm-none-eabi/newlib/thumb/v7e-m+fp/hard
     excludeList: []
     settings:
       debugger: cortex-debug
     toolchain: GCC
     toolchainConfigMap:
       GCC:
-        archExtensions: ''
+        archExtensions: ""
         cpuType: Cortex-M7
         floatingPointHardware: double
         options:
@@ -205,7 +207,7 @@ targets:
           global:
             $float-abi-type: hard
             arm-thumb-mode: thumb
-            misc-control: --specs=nano.specs --specs=nosys.specs
+            misc-control: --specs=/home/zn/.local/opt/arm-none-eabi/usr/lib/arm-none-eabi/newlib/nano.specs --specs=/home/zn/.local/opt/arm-none-eabi/usr/lib/arm-none-eabi/newlib/nosys.specs
             output-debug-info: enable
           linker:
             $outputTaskExcludes: []
@@ -220,17 +222,17 @@ targets:
         useCustomScatterFile: true
     uploadConfigMap:
       JLink:
-        baseAddr: ''
-        bin: ''
+        baseAddr: ""
+        bin: ""
         cpuInfo:
-          cpuName: 'null'
-          vendor: 'null'
-        otherCmds: ''
+          cpuName: "null"
+          vendor: "null"
+        otherCmds: ""
         proType: 1
         speed: 8000
       OpenOCD:
-        baseAddr: '0x08000000'
-        bin: ''
-        interface: cmsis-dap
+        baseAddr: "0x08000000"
+        bin: ""
+        interface: stlink-dap
         target: stm32h7x
     uploader: OpenOCD

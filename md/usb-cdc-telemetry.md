@@ -4,6 +4,9 @@
 
 当前工程的 USB_OTG_HS 使用 PA11/PA12 和内置 Full Speed PHY，USB 链路为 12 Mbps；没有切到外部 ULPI High Speed PHY。当前测试固件上电将普通 VOFA JustFloat 留在 UART8，板载 USB CDC 交给 `JID1` 双向通信。VOFA 与 S2R 仍共用遥测传输选择器，S2R、策略 VOFA、普通 VOFA 保持同口互斥，两种帧格式不能混在同一次采集文件中。
 
+另有默认关闭的 `HPI1` 上位机策略模式，使用同一 USB CDC 端口；它与 `JID1`
+以及 USB 端遥测互斥，详情见 [HPI1 说明](host-policy-usb.md)。
+
 ## 发送与切换
 
 `Vofa_send.c` 是共用的非阻塞发送入口。`vofa_transport.requested/active` 使用相同枚举，上电均为 1（UART8）；失能、S2R 退出、关节 USB 未占用且上一帧发送完成后，将 `requested` 写 0 切到 USB CDC，写 1 返回机器表指定的 UART8/USART1。其他值不触发切换。切换后策略 VOFA 清队列并请求重发历史。USB 未枚举或 CDC 仍忙时，发送入口返回忙，调用方保留待发帧；USB 传输完成前不覆写发送缓冲。

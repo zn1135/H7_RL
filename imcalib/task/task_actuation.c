@@ -5,6 +5,7 @@
 #include "tim.h"
 #include "mono_ns.h"
 #include "joint_usb.h"
+#include "host_policy_usb.h"
 
 /*
  * 输出任务三层结构 (作者 2026-09-22 定: 解算只算, 分发唯一):
@@ -91,6 +92,11 @@ uint8_t strategy_rc_enable(const rc_command_t *cmd)
 /* 左拨杆选模式: 先看 rc_enable(唯一判定), 再按挡位给策略 */
 static ctrl_strategy_t strategy_from_remote(const rc_command_t *cmd)
 {
+    if (HostPolicy_ModeLock())
+    {
+        return HostPolicy_EnableAllowed()
+            ? CTRL_STRATEGY_HOST_POLICY : CTRL_STRATEGY_DISABLE;
+    }
     if (JointUsb_ModeLock())
     {
         return JointUsb_PhysicalPermit()
@@ -221,6 +227,16 @@ void output_task_body(void)
     case CTRL_STRATEGY_RL:
         lqr_running = 0u;
         rl_engaged = (uint8_t)(rc_command.s2 == DR16_SW_MID && robot_state.motor_enabled);
+        if (rl_engaged)
+        {
+            solve_rl(wheel_vel, &torque);
+        }
+        break;
+
+    case CTRL_STRATEGY_HOST_POLICY:
+        lqr_running = 0u;
+        rl_engaged = (uint8_t)(robot_state.motor_enabled
+            && HostPolicy_EnableAllowed());
         if (rl_engaged)
         {
             solve_rl(wheel_vel, &torque);

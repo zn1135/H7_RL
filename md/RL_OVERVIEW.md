@@ -417,6 +417,6 @@ Leg_Solve 当前已完成以下验证：
 
 ### 8.3 VOFA
 
-当前测试固件上电经 UART8 发送普通 VOFA JustFloat 的固定 IMU 布局，USB CDC 留给关节 `JID1`；VOFA+ 可从 UART8 转接器保存 CSV，详见 [vofa_policy_trace.md](vofa_policy_trace.md)。**以 `task_comm.c::Robot_Control_Send_Vofa()` 上方注释为准**：ch0 在线掩码、ch1 状态位、ch2 RL 状态位、ch3～5 欧拉角、ch6～8 角速度、ch9～11 加速度、ch12～14 投影重力，约 50 Hz。失能且发送完成时写 `vofa_trace_requested=1` 可切到策略追踪；S2R1 二进制流为显式切换的另一种模式。
+当前测试固件上电经 UART8 发送普通 VOFA JustFloat，USB CDC 留给关节 `JID1`；VOFA+ 可从 UART8 转接器保存 CSV。普通帧 ch0～24 固定为策略的 25 维当前观测，ch25～31 为状态和发送序号，约 50 Hz，逐通道定义见 [vofa_policy_trace.md](vofa_policy_trace.md)。失能且发送完成时写 `vofa_trace_requested=1` 可切到策略追踪；S2R1 二进制流为显式切换的另一种模式。
 
-历史（RL 调试帧，`task_comm.c` 内已注释留档）：RL 模式（推理路径且左拨杆上位）曾复用 LQR 无意义的通道，下标不动：ch3~5 投影重力、ch6 RL 状态位、ch7~9 观测角速度（策略机体系，已镜像、×0.25）、ch10~13 固件原始 thigh / vs、ch15~20 观测关节速度（×0.05）、ch21~24 观测关节角、ch25~30 力矩命令（总输出关也有值）、ch31 推理耗时。
+历史 RL 调试帧布局已归档在 `md/sysid-change-map.md`；旧通道号不适用于当前普通 VOFA。
