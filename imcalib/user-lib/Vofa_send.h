@@ -5,7 +5,7 @@
 #include "usart.h"
 #include "machine_config.h"
 
-#define VOFA_MAX_CH  32   /* 上限 32; 当前实际发 32 路 (见 task_comm.c) */
+#define VOFA_MAX_CH  32   /* 普通10/追踪32 */
 #define VOFA_TRANSPORT_UART 1u
 #define VOFA_TRANSPORT_USB  0u
 

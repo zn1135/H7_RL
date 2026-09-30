@@ -8,6 +8,7 @@
 #include "Vofa_send.h"
 #include "uart_idle.h"
 #include "ws2812.h"
+#include "mono_ns.h"
 #include "task.h"
 #include "../Telemetry/s2r_telemetry.h"
 #include "../Telemetry/vofa_trace.h"
@@ -15,6 +16,7 @@
 #include "usbd_cdc_if.h"
 
 #include <math.h>
+#include <string.h>
 
 /* 更新电机状态 */
 static void Motor_State_Update(void)
@@ -196,124 +198,161 @@ static void Robot_Enable_Update(void)
 }
 
 /*
- * VOFA 观测帧 (JustFloat, 32 通道)
- * ch0 在线掩码；ch1 状态位；ch2 RL 状态位。
- * ch3~5 欧拉角；ch6~8 角速度；ch9~11 加速度；
- * ch12~14 RL 投影重力；ch15~31 当前未赋值。
- * 每二十次 commTask 周期发送一次。
- * LQR 布局(状态 x/target/腿长/u)在下方注释里备查。
+ * 普通 VOFA：单侧腿诊断，角度均为固件坐标。
+ * ch0 时间ms，ch1 侧，ch2~4 观测指令vx/yaw/height；
+ * ch5~8 大腿目标/实际、小腿目标/实际；ch9 腿长，ch10 摆角；
+ * ch11~14 前/后髋下发力矩、前/后髋反馈力矩；ch15 有效位。
+ * ch16~19 前/后髋位置、前/后髋速度；ch20~21 前/后髋雅可比；
+ * ch22~23 前/后反馈年龄ms，无可信时间戳为-1。
  */
 static void Robot_Control_Send_Vofa(void)
 {
-    static float dbg[VOFA_MAX_CH];
+    static float dbg[24];
     static uint8_t send_div;
-    uint8_t online_mask;
-    uint16_t state_bits;
-    uint32_t rl_bits;
+    const leg_map_t *map;
+    const leg_state_t *leg;
+    uint8_t side;
+    uint8_t front;
+    uint8_t rear;
+    uint8_t i;
+    uint8_t command_valid;
+    uint16_t valid = 0u;
+    uint64_t sample_ns;
+    float command[3] = {0.0f, 0.0f, 0.0f};
+    float scale;
 
-    if (++send_div < 20u)
+    /* 二分频 */
+    if (++send_div < 2u)
     {
         return;
     }
     send_div = 0u;
 
-    /* ch0 在线掩码 */
-    online_mask  = imu_state.online ? 0x01u : 0x00u;
-    online_mask |= DR16_Online() ? 0x02u : 0x00u;
-    online_mask |= motor_state.dm.online[0] ? 0x04u : 0x00u;
-    online_mask |= motor_state.dm.online[1] ? 0x08u : 0x00u;
-    online_mask |= motor_state.dm.online[2] ? 0x10u : 0x00u;
-    online_mask |= motor_state.dm.online[3] ? 0x20u : 0x00u;
-    online_mask |= motor_state.dji.online[0] ? 0x40u : 0x00u;
-    online_mask |= motor_state.dji.online[1] ? 0x80u : 0x00u;
-    dbg[0] = (float)online_mask;
+    memset(dbg, 0, sizeof(dbg));
+    /* 一致快照 */
+    vTaskSuspendAll();
+    side = output_leg_test_side();
+    map = side == 0u ? &leg_map_l : &leg_map_r;
+    leg = side == 0u ? &leg_l : &leg_r;
+    sample_ns = Mono_Ns_Get();
+    dbg[0] = (float)(sample_ns / 1000000u);
+    dbg[1] = (float)side;
+    dbg[22] = -1.0f;
+    dbg[23] = -1.0f;
+    valid |= output_debug_dm_sent ? 0x020u : 0u;
+    valid |= robot_state.motor_enabled ? 0x040u : 0u;
+    valid |= output_task_rl_engaged() ? 0x080u : 0u;
+    valid |= torque_output_enabled ? 0x100u : 0u;
+    valid |= leg_response_test.active ? 0x200u : 0u;
+    valid |= leg_response_test.inhibited ? 0x400u : 0u;
+    valid |= ctrl_fault != 0u ? 0x800u : 0u;
 
-    /* ch1 状态位: 使能/跌倒/左腿有效/右腿有效/四髋使能/已投入 */
-    state_bits  = robot_state.motor_enabled ? 0x01u : 0x00u;
-    state_bits |= robot_state.fallen ? 0x02u : 0x00u;
-    state_bits |= leg_l.output.valid ? 0x04u : 0x00u;
-    state_bits |= leg_r.output.valid ? 0x08u : 0x00u;
-    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_F_LFT) ? 0x10u : 0x00u;
-    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_B_LFT) ? 0x20u : 0x00u;
-    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_F_RGT) ? 0x40u : 0x00u;
-    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_B_RGT) ? 0x80u : 0x00u;
-    state_bits |= output_task_lqr_engaged() ? 0x100u : 0x00u;
-    state_bits |= output_task_rl_engaged() ? 0x200u : 0x00u;
-    dbg[1] = (float)state_bits;
-
-    rl_bits  = rl_control.policy.ready ? 0x01u : 0x00u;
-    rl_bits |= rl_control.observation.history_ready ? 0x02u : 0x00u;
-    rl_bits |= action_state.rl_ready ? 0x04u : 0x00u;
-    rl_bits |= output_task_rl_engaged() ? 0x08u : 0x00u;
-    rl_bits |= rl_control.observation.valid ? 0x40u : 0x00u;
-    rl_bits |= machine->rl.configured ? 0x80u : 0x00u;
-    rl_bits |= (rl_control.policy.run_fail & 0xFFu) << 8;
-    rl_bits |= output_debug_dm_sent ? 0x00010000u : 0x00u;
-    rl_bits |= output_debug_dji_sent ? 0x00020000u : 0x00u;
-    dbg[2] = (float)rl_bits;
-
-
-    // dbg[3]  = imu_state.euler_rad[0];
-    // dbg[4]  = imu_state.euler_rad[1];
-    // dbg[5]  = imu_state.euler_rad[2];
-    // dbg[6]  = imu_state.gyro_rad_s[0];
-    // dbg[7]  = imu_state.gyro_rad_s[1];
-    // dbg[8]  = imu_state.gyro_rad_s[2];
-    dbg[9]  = rl_control.observation.obs[0];
-    dbg[10] = rl_control.observation.obs[1];
-    dbg[11] = rl_control.observation.obs[2];
-    dbg[12] = rl_control.observation.obs[3];
-    dbg[13] = rl_control.observation.obs[4];
-    dbg[14] = rl_control.observation.obs[5];
-    /* RL 观测/出力布局 (a824da1 曾注释, 2026-09-27 恢复) */
-    // for (i = 0u; i < DM_MOTOR_NUM; i++)
-    // {
-    //     dbg[3u + i] = rl_output_dm_cmd_nm[i];
-    //     dbg[9u + i] = motor_state.dm.trq_nm[i];
-    //     dbg[13u + i] = rl_control.observation.obs[RL_OBS_L_THIGH + i];
-    // }
-    // dbg[7] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_LFT];
-    // dbg[8] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_RGT];
-    // for (i = 0u; i < DJI_MOTOR_NUM; i++)
-    // {
-    //     dbg[29u + i] = motor_state.dji.current_raw[
-    //         (i == DJI_MOTOR_WHEEL_LFT) ? DJI_MOTOR_WHEEL_RGT : DJI_MOTOR_WHEEL_LFT];
-    // }
-    // for (i = 0u; i < RL_ACTION_SIZE; i++)
-    // {
-    //     dbg[17u + i] = rl_control.observation.obs[RL_OBS_L_THIGH_VEL + i];
-    //     dbg[23u + i] = rl_control.observation.obs[RL_OBS_LAST_ACTION + i];
-    // }
-    // if (!robot_state.motor_enabled)
-    // {
-    //     dbg[23] = (float)huart9.RxState;
-    //     dbg[24] = (float)hdma_uart9_rx.State;
-    //     dbg[25] = (float)__HAL_DMA_GET_COUNTER(&hdma_uart9_rx);
-    //     dbg[26] = (float)dbus_rx.dma_pos;
-    //     dbg[27] = (float)dbus_rx.isr_len;
-    //     dbg[28] = (float)dr16.last_rx_tick;
-    // }
-    // dbg[31] = (float)ctrl_fault;   /* 0x10 = FAULT_ACTION */
-
-    // dbg[31] = (float)rl_control.policy.run_us;
-
-    /* LQR 布局备查 (要用就整段换回)
-    for (i = 0u; i < 10u; i++)
+    /* 观测指令 */
+    command_valid = (uint8_t)(rl_control.observation.valid && rl_control.param.configured);
+    if (command_valid)
     {
-        dbg[3+i]  = lqr_state.x[i];
-        dbg[13+i] = lqr_state.target[i];
+        for (i = 0u; i < 3u; i++)
+        {
+            scale = rl_control.param.command_scale[i];
+            if (!isfinite(scale) || scale == 0.0f
+                || !isfinite(rl_control.observation.obs[RL_OBS_CMD_VX + i]))
+            {
+                command_valid = 0u;
+                break;
+            }
+            command[i] = rl_control.observation.obs[RL_OBS_CMD_VX + i] / scale;
+            if (!isfinite(command[i]))
+            {
+                command_valid = 0u;
+                break;
+            }
+        }
     }
-    for (i = 0u; i < 2u; i++)
+    if (command_valid)
     {
-        dbg[23+i] = lqr_state.len[i];
-        dbg[25+i] = lqr_state.leg_len_tgt[i];
+        for (i = 0u; i < 3u; i++)
+        {
+            dbg[2u + i] = command[i];
+        }
+        valid |= 0x010u;
     }
-    for (i = 0u; i < 4u; i++)
+
+    if (side <= 1u && map->configured && map->dm_front >= 0 && map->dm_rear >= 0
+        && map->dm_front < DM_MOTOR_NUM && map->dm_rear < DM_MOTOR_NUM
+        && map->dm_front != map->dm_rear)
     {
-        dbg[27+i] = lqr_state.u[i];
+        front = (uint8_t)map->dm_front;
+        rear = (uint8_t)map->dm_rear;
+        dbg[11] = isfinite(rl_output_dm_cmd_nm[front]) ? rl_output_dm_cmd_nm[front] : 0.0f;
+        dbg[12] = isfinite(rl_output_dm_cmd_nm[rear]) ? rl_output_dm_cmd_nm[rear] : 0.0f;
+        if (motor_state.dm.parsed_rx_ns[front] != 0u
+            && motor_state.dm.parsed_rx_ns[front] <= sample_ns)
+        {
+            dbg[22] = (float)(sample_ns - motor_state.dm.parsed_rx_ns[front]) * 1.0e-6f;
+        }
+        if (motor_state.dm.parsed_rx_ns[rear] != 0u
+            && motor_state.dm.parsed_rx_ns[rear] <= sample_ns)
+        {
+            dbg[23] = (float)(sample_ns - motor_state.dm.parsed_rx_ns[rear]) * 1.0e-6f;
+        }
+        if (motor_state.dm.online[front] && !Dm_Has_Fault(front)
+            && isfinite(motor_state.dm.pos_zero_rad[front])
+            && isfinite(motor_state.dm.trq_nm[front])
+            && isfinite(motor_state.dm.vel_rad_s[front])
+            && motor_state.dm.parsed_rx_ns[front] != 0u
+            && motor_state.dm.parsed_rx_ns[front] <= sample_ns
+            && sample_ns - motor_state.dm.parsed_rx_ns[front] <= 10000000u)
+        {
+            dbg[13] = motor_state.dm.trq_nm[front];
+            dbg[16] = motor_state.dm.pos_zero_rad[front];
+            dbg[18] = motor_state.dm.vel_rad_s[front];
+            valid |= 0x001u;
+        }
+        if (motor_state.dm.online[rear] && !Dm_Has_Fault(rear)
+            && isfinite(motor_state.dm.pos_zero_rad[rear])
+            && isfinite(motor_state.dm.trq_nm[rear])
+            && isfinite(motor_state.dm.vel_rad_s[rear])
+            && motor_state.dm.parsed_rx_ns[rear] != 0u
+            && motor_state.dm.parsed_rx_ns[rear] <= sample_ns
+            && sample_ns - motor_state.dm.parsed_rx_ns[rear] <= 10000000u)
+        {
+            dbg[14] = motor_state.dm.trq_nm[rear];
+            dbg[17] = motor_state.dm.pos_zero_rad[rear];
+            dbg[19] = motor_state.dm.vel_rad_s[rear];
+            valid |= 0x002u;
+        }
+
+        if ((valid & 0x003u) == 0x003u && leg->output.valid
+            && isfinite(leg->output.thigh_angle)
+            && isfinite(leg->output.virtual_shank_angle)
+            && isfinite(leg->output.virtual_leg_length)
+            && isfinite(leg->output.virtual_leg_angle)
+            && isfinite(leg->output.vshank_jac[0])
+            && isfinite(leg->output.vshank_jac[1]))
+        {
+            dbg[6] = leg->output.thigh_angle;
+            dbg[8] = leg->output.virtual_shank_angle;
+            dbg[9] = leg->output.virtual_leg_length;
+            dbg[10] = leg->output.virtual_leg_angle;
+            dbg[20] = leg->output.vshank_jac[1];
+            dbg[21] = leg->output.vshank_jac[0];
+            valid |= 0x004u;
+        }
+
+        /* 真实目标 */
+        if (rl_output_diag.valid && rl_output_diag.updated_ns <= sample_ns
+            && sample_ns - rl_output_diag.updated_ns <= 10000000u
+            && isfinite(rl_output_diag.joint_target[side * 2u])
+            && isfinite(rl_output_diag.joint_target[side * 2u + 1u]))
+        {
+            dbg[5] = rl_output_diag.joint_target[side * 2u];
+            dbg[7] = rl_output_diag.joint_target[side * 2u + 1u];
+            valid |= 0x008u;
+        }
     }
-    */
-    Vofa_Send(dbg, 32u);
+    dbg[15] = (float)valid;
+    (void)xTaskResumeAll();
+    (void)Vofa_Send(dbg, 24u);
 }
 
 /* 通信单周期 */
@@ -332,7 +371,7 @@ void comm_task_body(void)
     Robot_Fault_Update();
     Robot_Enable_Update();
     JointUsb_Pump();
-    /* 同口互斥：S2R > 策略 VOFA > 普通 VOFA；切换条件见 md/vofa_policy_trace.md。 */
+    /* 同口互斥：S2R > 策略 VOFA > 普通 VOFA；普通布局现为单侧腿响应。 */
     s2r_active = S2R_Pump();
     if (s2r_active)
     {

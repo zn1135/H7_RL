@@ -4,14 +4,22 @@
 /* 编译期检查: 极性表长度对齐 */
 typedef char dji_num_check[(MACHINE_WHEEL_NUM == DJI_MOTOR_NUM) ? 1 : -1];
 
-/* 固定参 (极性见 machine_config.c) */
+/* 按机型选 ID */
+#if MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
+#define DJI_FEEDBACK_ID_LFT 0x202u
+#define DJI_FEEDBACK_ID_RGT 0x201u
+#else
+#define DJI_FEEDBACK_ID_LFT 0x201u
+#define DJI_FEEDBACK_ID_RGT 0x202u
+#endif
+
 const dji_motor_config_t dji_motor_config[DJI_MOTOR_NUM] = {
     [DJI_MOTOR_WHEEL_LFT] = {
-        .feedback_id = 0x201u,
+        .feedback_id = DJI_FEEDBACK_ID_LFT,
         .control_id = 0x200u,
     },
     [DJI_MOTOR_WHEEL_RGT] = {
-        .feedback_id = 0x202u,
+        .feedback_id = DJI_FEEDBACK_ID_RGT,
         .control_id = 0x200u,
     },
 };
@@ -226,20 +234,23 @@ HAL_StatusTypeDef Dji_Send_Current(FDCAN_HandleTypeDef *hfdcan, uint32_t can_id,
     return Can_Bus_Transmit(hfdcan, can_id, data, sizeof(data));
 }
 
-/* 左右轮力矩 (输出极性按 machine->dji_sign 在驱动边界处理) */
+/* 按 ID 选槽 */
 HAL_StatusTypeDef Dji_Send_Wheel_Torque(float left_torque_nm,
                                         float right_torque_nm)
 {
     const dji_motor_config_t *cfg_l = &dji_motor_config[DJI_MOTOR_WHEEL_LFT];
+    const dji_motor_config_t *cfg_r = &dji_motor_config[DJI_MOTOR_WHEEL_RGT];
+    uint8_t slot_l = (uint8_t)(cfg_l->feedback_id - 0x201u);
+    uint8_t slot_r = (uint8_t)(cfg_r->feedback_id - 0x201u);
 
     wheel_current[0] = 0;
     wheel_current[1] = 0;
     wheel_current[2] = 0;
     wheel_current[3] = 0;
-    wheel_current[DJI_MOTOR_WHEEL_LFT] = Dji_Torque_To_Current(
+    wheel_current[slot_l] = Dji_Torque_To_Current(
         DJI_MOTOR_WHEEL_LFT,
         left_torque_nm * (float)machine->dji_sign[DJI_MOTOR_WHEEL_LFT].out);
-    wheel_current[DJI_MOTOR_WHEEL_RGT] = Dji_Torque_To_Current(
+    wheel_current[slot_r] = Dji_Torque_To_Current(
         DJI_MOTOR_WHEEL_RGT,
         right_torque_nm * (float)machine->dji_sign[DJI_MOTOR_WHEEL_RGT].out);
     return Dji_Send_Current(Can_Bus_Handle(machine->dji_bus), cfg_l->control_id,

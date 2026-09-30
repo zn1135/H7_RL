@@ -981,7 +981,7 @@ static void build_meta(void)
     {
         json_append("%s{\"rx_id\":%u,\"tx_id\":%u,\"bus\":%u,\"fb_sign\":%d,\"out_sign\":%d,\"zero\":%.9g}", i ? "," : "", dm_motor_config[i].feedback_id, dm_motor_config[i].control_id, m->dm_bus[i], m->dm_sign[i].fb, m->dm_sign[i].out, (double)m->dm_zero[i]);
     }
-    json_append("],\"wheel_source_indices\":[1,0],\"dji_bus\":%u,\"dji_type\":%u,\"gear_ratio\":%.9g,\"wheel_radius\":%.9g,", m->dji_bus, m->dji_type, (double)m->dji_gear_ratio, (double)m->wheel_r);
+    json_append("],\"wheel_source_indices\":[0,1],\"dji_bus\":%u,\"dji_type\":%u,\"gear_ratio\":%.9g,\"wheel_radius\":%.9g,", m->dji_bus, m->dji_type, (double)m->dji_gear_ratio, (double)m->wheel_r);
     json_append("\"wheel_sign\":[[%d,%d],[%d,%d]],\"motor_units\":\"driver logical output axis, rad/rad_s/Nm\",", m->dji_sign[0].fb, m->dji_sign[0].out, m->dji_sign[1].fb, m->dji_sign[1].out);
     json_append("\"feedback\":{\"dm_torque\":\"driver MIT estimate\",\"wheel_torque\":null,\"motor_current_A\":null,\"accel_includes_gravity\":null},");
     json_array("gas_force_n", m->gas_spring_force_n, 2u);

@@ -71,6 +71,19 @@ typedef struct {
 } robot_state_t;
 
 typedef struct {
+    uint8_t requested;  /* 请求测试 */
+    uint8_t active;     /* 已锁存 */
+    uint8_t side;       /* 左0右1 */
+    uint8_t inhibited;  /* 变更闭锁 */
+} leg_response_test_t;
+
+typedef struct {
+    float joint_target[4]; /* 虚拟关节 */
+    uint64_t updated_ns;   /* 执行时刻 */
+    uint8_t valid;         /* 求解成功 */
+} rl_output_diag_t;
+
+typedef struct {
     rl_observation_state_t observation;
     rl_observation_param_t param;
     rl_policy_t policy;
@@ -113,6 +126,9 @@ extern volatile uint8_t output_debug_dm_sent;
 extern volatile uint8_t output_debug_dji_sent;
 extern volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 extern volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
+extern volatile leg_response_test_t leg_response_test;
+extern volatile rl_output_diag_t rl_output_diag;
+extern volatile uint8_t vofa_leg_response_side;
 extern uint8_t torque_output_enabled;
 extern osSemaphoreId ctrl_tick_sem_handle;
 extern osSemaphoreId policy_tick_sem_handle;
@@ -126,10 +142,13 @@ void imu_task_init(void);
 void imu_task_body(void);
 void ctrl_task_init(void);
 void ctrl_task_body(void);
+/* 固件虚拟腿关节 -> RL 关节；输出以 RL zero 为零，不叠加训练默认角。 */
+uint8_t RL_Joint_Map(float joint_pos[4], float joint_vel[6]);
 void output_task_init(void);
 void output_task_body(void);
 uint8_t output_task_lqr_engaged(void);
 uint8_t output_task_rl_engaged(void);
+uint8_t output_leg_test_side(void);
 /* 遥控使能唯一判定 */
 uint8_t strategy_rc_enable(const rc_command_t *cmd);
 void comm_task_body(void);

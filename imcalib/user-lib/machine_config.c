@@ -16,7 +16,7 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
         .dm_trq_clamp   = 40.0f,                       /* 对齐训练侧腿关节力矩限幅 */
         /* 极性: 前左/后左/前右/后右 */
         .dm_sign        = {{1, 1}, {1, 1}, {-1, -1}, {-1, -1}},
-        .dji_sign       = {{1, 1}, {-1, -1}},
+        .dji_sign       = {{-1, -1}, {1, 1}},
         /* 总线: 腿 4 台全在 FDCAN1, 轮在 FDCAN3 */
         .dm_bus         = {1, 1, 1, 1},
         .dji_bus        = 3,

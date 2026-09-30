@@ -42,7 +42,7 @@ static uint8_t RL_Motors_Online(void)
 }
 
 /* 固件关节 → 训练关节: q_t = sign × wrap(q − zero), 速度同符号; 映射未配置返回 0 */
-static uint8_t RL_Joint_Map(float joint_pos[4], float joint_vel[6])
+uint8_t RL_Joint_Map(float joint_pos[4], float joint_vel[6])
 {
     const rl_map_t *map = &machine->rl;
     float qd[6];
@@ -57,11 +57,10 @@ static uint8_t RL_Joint_Map(float joint_pos[4], float joint_vel[6])
     joint_pos[3] = (float)map->sign[4] * Angle_Wrap_180(leg_r.output.virtual_shank_angle - map->zero[3]);
     qd[0] = leg_l.input.d_hip_f;
     qd[1] = leg_l.output.d_virtual_shank_angle;
-    /* 台架反馈核对: 物理左轮目前从 DJI RGT 索引进入, RL 左轮槽在这里交换来源 */
-    qd[2] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
+    qd[2] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
     qd[3] = leg_r.input.d_hip_f;
     qd[4] = leg_r.output.d_virtual_shank_angle;
-    qd[5] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
+    qd[5] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
     for (uint8_t i = 0u; i < 6u; i++)
     {
         joint_vel[i] = (float)map->sign[i] * qd[i];
@@ -129,10 +128,22 @@ static void RL_Action_Publish(const float action[RL_ACTION_SIZE], uint8_t rl_rea
 /* 遥控 → 策略指令: 前进 / 转向 / 高度 (范围 RL_CMD_*; 转向右推为负, 同 LQR) */
 static void RL_Command_From_Rc(float command[3])
 {
-    command[0] = rc_command.vel * RL_CMD_VX_MAX;
-    command[1] = -rc_command.yaw * RL_CMD_YAW_MAX;
-    command[2] = RL_CMD_HEIGHT_MIN
-               + (rc_command.len + 1.0f) * 0.5f * (RL_CMD_HEIGHT_MAX - RL_CMD_HEIGHT_MIN);
+    float vx_max = RL_CMD_VX_MAX;
+    float yaw_max = RL_CMD_YAW_MAX;
+    float height_min = RL_CMD_HEIGHT_MIN;
+    float height_max = RL_CMD_HEIGHT_MAX;
+
+    if (leg_response_test.active)
+    {
+        vx_max = RL_TEST_CMD_VX_MAX;
+        yaw_max = RL_TEST_CMD_YAW_MAX;
+        height_min = RL_TEST_CMD_HEIGHT_MIN;
+        height_max = RL_TEST_CMD_HEIGHT_MAX;
+    }
+    command[0] = rc_command.vel * vx_max;
+    command[1] = -rc_command.yaw * yaw_max;
+    command[2] = height_min
+               + (rc_command.len + 1.0f) * 0.5f * (height_max - height_min);
     input_command.vx_cmd = command[0];
     input_command.yaw_cmd = command[1];
     input_command.height_cmd = command[2];

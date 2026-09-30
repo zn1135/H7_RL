@@ -14,6 +14,9 @@
 *.ept
 *.eide-template
 
+# Python tools' interpreter cache
+__pycache__/
+
 # sysid 采集数据与导出产物
 /data
 

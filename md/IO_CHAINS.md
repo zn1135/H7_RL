@@ -157,7 +157,7 @@ motor_state.dm:
 
 ---
 
-## 3. DJI 轮电机（M2006 电流协议）
+## 3. DJI 轮电机（M2006 / M3508 电流协议）
 
 ```
 DJI 轮电机 × 2 (小机器 M2006 @ FDCAN2, 共享 control_id=0x200; 大机器 M3508, 总线以 machine_config.c 的 dji_bus 为准)
@@ -194,14 +194,13 @@ motor_state.dji:
     ▼
 输出: torque_output_t → task_actuation.c::output_dispatch
     torque.dji[DJI_MOTOR_*] → Dji_Send_Wheel_Torque(left_nm, right_nm)
-      (RL 路径左右轮槽对调: 实际传 torque.dji[RGT], torque.dji[LFT]，
-       台架反馈核对的轮左右交叉, 见 task_actuation.c::output_dispatch, 待作者台架确认)
+      左右逻辑顺序直接传入，驱动按 feedback_id 选 0x200 电流槽
       输出极性: 力矩 × dji_sign[i].out 后才换算电流 (dji.c 驱动边界)
       Dji_Torque_To_Current():
         raw = torque_nm / per_raw, clamp ±满 raw
         per_raw = 满电流堵转力矩/满 raw × (dji_gear_ratio / 标准减速比)
         (M2006 在标准减速比下等效 0.00018 Nm/raw、±10000；随 dji_gear_ratio 缩放, 以 dji.c/dji.h 为准)
-      wheel_current[0..3] → Dji_Send_Current(总线, 0x200, current)
+      wheel_current[feedback_id-0x201] → Dji_Send_Current(总线, 0x200, current)
         → 8 字节: 4×int16 大端打包
     Dji_All_Stop():
       → 4 通道全 0 电流
@@ -211,11 +210,11 @@ motor_state.dji:
 
 | 索引 | 位置 | CAN | feedback_id | control_id |
 |:----:|------|-----|:-----------:|:----------:|
-| 0 | 左轮 | FDCAN2 | 0x201 | 0x200 |
-| 1 | 右轮 | FDCAN2 | 0x202 | 0x200 |
+| 0 | 左轮 | 大机 FDCAN3 / 小机 FDCAN2 | 大机 0x202 / 小机 0x201 | 0x200 |
+| 1 | 右轮 | 大机 FDCAN3 / 小机 FDCAN2 | 大机 0x201 / 小机 0x202 | 0x200 |
 
 型号与总减速比按机器取（`machine_config.c` 的 `dji_type` / `dji_gear_ratio`）：本机 M2006 / chuanliantui M3508。
-表结构与 DM 完全一致（`motor_cfg_t`，见 `can_bus.h`）；极性同样在 `machine_config.c` 的 `dji_sign[2]`。上表 CAN 列为小机器接法，总线以 `machine->dji_bus` 为准。
+表结构与 DM 完全一致（`motor_cfg_t`，见 `can_bus.h`）；极性在 `machine_config.c` 的 `dji_sign[2]`。反馈 ID 按机型在 `dji.c` 选定，`0x200` 电流槽始终按 `0x201`、`0x202` 排列。
 
 **关键函数:**
 
@@ -361,8 +360,8 @@ motor_state_t motor_state:
 消费端:
   task_comm.c:   dm/dji.online + Dm_Has_Fault → FAULT_MOTOR
   task_comm.c:   dm.pos_zero_rad/vel_rad_s → leg.input (髋关节映射，零点已在 dm.c 叠加, +π 在 Leg_State_Update 折算)
-  task_actuation.c: dji.vel_rad_s → wheel_vel (LQR 速度估计; RL 轮速, 传入前左右槽对调)
-  task_policy.c: dm/dji.online → RL_Motors_Online; dji.vel_rad_s → RL_Joint_Map 观测轮速 (左右槽交叉)
+  task_actuation.c: dji.vel_rad_s → wheel_vel (LQR 速度估计; RL 轮速, 左右原序)
+  task_policy.c: dm/dji.online → RL_Motors_Online; dji.vel_rad_s → RL_Joint_Map 观测轮速 (左右原序)
   (早期文档记 "task_policy.c: dm.pos_zero_rad/vel → obs.joint_pos/vel" 已不准确:
    obs 关节角/速度来自 leg_solver 输出经 RL_Joint_Map 映射, 见 §7)
 ```
@@ -497,7 +496,7 @@ task_comm.c:
 | force_det / force_valid | 行列式 / 有效位 | 解算内部，force_valid 供 Force_Map_Forward 门控 |
 | point_jac[2][2] | P 点雅可比 | **无人消费**（计算后死输出） |
 
-**VOFA 观测：**32 路 JustFloat；当前布局与打包顺序以 `task_comm.c::Robot_Control_Send_Vofa()` 上方注释为准（"当前为 IMU 极性测试帧"等历史测试阶段描述已过时）。
+**VOFA 观测：**普通帧为 10 路 JustFloat 单侧腿响应，策略追踪为 32 路；当前普通布局和单侧测试流程见 [leg-response-vofa.md](leg-response-vofa.md)，打包源为 `task_comm.c::Robot_Control_Send_Vofa()`。
 
 ---
 
@@ -519,8 +518,7 @@ imu_state (IMU 姿态)
                        右大腿(thigh_angle), 右小腿(virtual_shank_angle)] 映射后 → obs[9-12] − dof_pos
     joint_vel[0..5] = sign[i] × [左大腿速度(d_hip_f), 左小腿速度, 左轮, 右大腿速度, 右小腿速度, 右轮]
                        → obs[13-18] × joint_vel_scale
-    轮槽左右交叉: 左轮槽取 motor_state.dji.vel_rad_s[WHEEL_RGT], 右轮槽取 [WHEEL_LFT]
-      (台架反馈核对结论, task_policy.c:58 注释; 待作者台架确认)
+    左轮槽取 motor_state.dji.vel_rad_s[WHEEL_LFT]，右轮槽取 [WHEEL_RGT]
 obs[19-24] = last_action[6] (上步训练空间动作, RL_Observation_Set_Last_Action 写入)
     │
     │  RL_Observation_Build() @ policyTask (task_policy.c)
@@ -555,10 +553,10 @@ rl_observation_state_t:
 | 12 | r_shank | RL_Joint_Map(joint_pos[3]) − dof_pos | — |
 | 13 | l_thigh_vel | leg_l.input.d_hip_f × sign | joint_vel_scale |
 | 14 | l_shank_vel | leg_l.output.d_virtual_shank_angle × sign | joint_vel_scale |
-| 15 | l_wheel_vel | dji.vel_rad_s[WHEEL_RGT]（交叉）× sign | joint_vel_scale |
+| 15 | l_wheel_vel | dji.vel_rad_s[WHEEL_LFT] × sign | joint_vel_scale |
 | 16 | r_thigh_vel | leg_r.input.d_hip_f × sign | joint_vel_scale |
 | 17 | r_shank_vel | leg_r.output.d_virtual_shank_angle × sign | joint_vel_scale |
-| 18 | r_wheel_vel | dji.vel_rad_s[WHEEL_LFT]（交叉）× sign | joint_vel_scale |
+| 18 | r_wheel_vel | dji.vel_rad_s[WHEEL_RGT] × sign | joint_vel_scale |
 | 19-24 | last_action | 上步动作（训练空间） | — |
 
 ---

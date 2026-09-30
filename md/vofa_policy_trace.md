@@ -1,12 +1,12 @@
 # VOFA 采集与模式切换
 
-当前测试固件上电通过 UART8 发送普通 32 通道 JustFloat，USB CDC 留给 `JID1` 双向通信；电脑选择原 UART8 转接器对应的 COM 口，设置 1152000、8N1。每帧为 32 个小端 float32 和 `00 00 80 7F` 帧尾，共 132 字节。`vofa_transport.requested/active` 中 1 为默认 UART8，0 为 USB CDC 遥测；有线 VOFA 实测记录见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。S2R1 二进制流上电不占口，VOFA+ 可按 JustFloat 解析当前普通帧。
+当前测试固件上电通过 UART8 发送普通 10 通道 JustFloat 单侧腿响应帧；USB CDC 留给 `JID1` 双向通信。`vofa_transport.requested/active` 中 1 为默认 UART8，0 为 USB CDC 遥测。普通帧为 10 个小端 float32 和 `00 00 80 7F` 帧尾，共 44 字节；布局、切侧和解码见 [leg-response-vofa.md](leg-response-vofa.md)。S2R1 二进制流上电不占口。
 
 ## 普通 VOFA（上电默认）
 
-`task_comm.c::Robot_Control_Send_Vofa()` 约 50 Hz 发送。VOFA+ 选择 JustFloat、32 通道：ch0 是在线掩码，ch1 是状态位，ch2 是 RL 状态位；ch3～5 是 `imu_state.euler_rad[0..2]`，ch6～8 是 `gyro_rad_s[0..2]`，ch9～11 是 `acc_g[0..2]`，ch12～14 是 RL 观测中的投影重力 XYZ。ch15～31 当前未赋值，不能按历史布局解释。轴来源和符号以 `machine_config.c` 当前机器表为准，未凭通道号确认物理极性。
+`task_comm.c::Robot_Control_Send_Vofa()` 约 500 Hz 发送。VOFA+ 必须选择 JustFloat、10 通道。当前普通布局只记录 `vofa_leg_response_side` 失能锁存侧的前/后髋位置、最新下发命令反解的虚拟关节力矩、RL 零点相对位置和虚拟腿长；不再输出 IMU 或策略观测。本测试固件上电默认 `leg_response_test.requested=1`、左腿单测，先失能锁存后再投入；恢复双侧输出须失能时写 requested=0。完整字段、有效位与操作步骤以 [leg-response-vofa.md](leg-response-vofa.md) 为准。
 
-普通 VOFA 不含策略帧类型、序号和 MCU 时间戳，不能交给下文的策略追踪解码脚本。若只需查看这些通道，在 VOFA+ 直接画 ch3～14。
+普通 VOFA 不含策略帧类型、序号或 CRC；虽然 ch0 有 MCU 毫秒时间，仍不能交给下文的策略追踪解码脚本。使用 `tools/leg_response_vofa_decode.py` 保存和展开单侧记录。
 
 电机失能且上一帧发送完成时，将 `vofa_trace_requested` 写 1 可切到下文的策略追踪；写 0 返回普通 VOFA。两种布局应分别保存采集文件。将 `s2r_diagnostic_requested` 写 1 可切到 S2R1 二进制流；它与 VOFA 互斥，VOFA+ 不能解析 S2R1。
 

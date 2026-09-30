@@ -18,6 +18,53 @@ static uint8_t lqr_running;     /* 已投入 */
 static uint8_t rl_engaged;      /* RL 已投入 */
 volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
+volatile leg_response_test_t leg_response_test = {1u, 0u, 0u, 0u};
+volatile rl_output_diag_t rl_output_diag;
+volatile uint8_t vofa_leg_response_side = 0u;
+
+/* 失能锁存测试配置 */
+static void output_leg_test_update(void)
+{
+    uint8_t requested;
+    uint8_t side;
+
+    requested = leg_response_test.requested;
+    side = vofa_leg_response_side;
+    if (!robot_state.motor_enabled)
+    {
+        leg_response_test.active = (uint8_t)(requested == 1u);
+        leg_response_test.side = side;
+        leg_response_test.inhibited = (uint8_t)(requested > 1u || side > 1u);
+    }
+    else if (requested != leg_response_test.active
+        || ((leg_response_test.active || requested)
+            && side != leg_response_test.side))
+    {
+        leg_response_test.inhibited = 1u;
+    }
+}
+
+/* 遥测跟随锁存侧 */
+uint8_t output_leg_test_side(void)
+{
+    return leg_response_test.side;
+}
+
+/* 记录本拍关节目标 */
+static void output_rl_diag_update(const torque_output_t *torque, uint64_t queue_ns)
+{
+    rl_output_diag.valid = 0u;
+    if (ctrl_strategy != CTRL_STRATEGY_RL || !torque->valid)
+    {
+        return;
+    }
+    rl_output_diag.joint_target[0] = rl_control.torque_state.pos_target[0];
+    rl_output_diag.joint_target[1] = rl_control.torque_state.pos_target[1];
+    rl_output_diag.joint_target[2] = rl_control.torque_state.pos_target[3];
+    rl_output_diag.joint_target[3] = rl_control.torque_state.pos_target[4];
+    rl_output_diag.updated_ns = queue_ns;
+    rl_output_diag.valid = 1u;
+}
 
 /* 输出初始化 */
 void output_task_init(void)
@@ -44,27 +91,68 @@ uint8_t output_task_rl_engaged(void)
 /* valid=0 或总输出关 → 零力矩; 否则原样下发 (各路限幅已在控制器内做, 极性在驱动边界做) */
 static void output_dispatch(const torque_output_t *torque)
 {
-    if (!torque->valid || !torque_output_enabled)
+    torque_output_t applied;
+    const leg_map_t *map;
+    uint8_t i;
+
+    applied = *torque;
+    if (!JointUsb_ModeLock())
     {
-        output_debug_dm_sent = 0u;
-        output_debug_dji_sent = 0u;
-        for (uint8_t i = 0u; i < DM_MOTOR_NUM; i++) rl_output_dm_cmd_nm[i] = 0.0f;
-        for (uint8_t i = 0u; i < DJI_MOTOR_NUM; i++) rl_output_wheel_cmd_nm[i] = 0.0f;
-        (void)Dm_Send_Zero();
-        (void)Dji_All_Stop();
+        if (leg_response_test.inhibited
+            || (leg_response_test.active && ctrl_strategy != CTRL_STRATEGY_RL))
+        {
+            applied.valid = 0u;
+        }
+        else if (leg_response_test.active)
+        {
+            map = leg_response_test.side == 0u ? &leg_map_l : &leg_map_r;
+            if (leg_response_test.side > 1u || !map->configured
+                || map->dm_front < 0 || map->dm_front >= DM_MOTOR_NUM
+                || map->dm_rear < 0 || map->dm_rear >= DM_MOTOR_NUM
+                || map->dm_front == map->dm_rear)
+            {
+                applied.valid = 0u;
+            }
+            else
+            {
+                for (i = 0u; i < DM_MOTOR_NUM; i++)
+                {
+                    if (i != (uint8_t)map->dm_front && i != (uint8_t)map->dm_rear)
+                    {
+                        applied.dm[i] = 0.0f;
+                    }
+                }
+                for (i = 0u; i < DJI_MOTOR_NUM; i++)
+                {
+                    applied.dji[i] = 0.0f;
+                }
+            }
+        }
+    }
+    if (!applied.valid || !torque_output_enabled)
+    {
+        for (i = 0u; i < DM_MOTOR_NUM; i++)
+        {
+            rl_output_dm_cmd_nm[i] = 0.0f;
+        }
+        for (i = 0u; i < DJI_MOTOR_NUM; i++)
+        {
+            rl_output_wheel_cmd_nm[i] = 0.0f;
+        }
+        output_debug_dm_sent = (uint8_t)(Dm_Send_Zero() == HAL_OK);
+        output_debug_dji_sent = (uint8_t)(Dji_All_Stop() == HAL_OK);
         return;
     }
-    for (uint8_t i = 0u; i < DM_MOTOR_NUM; i++)
+    for (i = 0u; i < DM_MOTOR_NUM; i++)
     {
-        rl_output_dm_cmd_nm[i] = torque->dm[i];
+        rl_output_dm_cmd_nm[i] = applied.dm[i];
     }
-    rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_LFT] = torque->dji[DJI_MOTOR_WHEEL_LFT];
-    rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_RGT] = torque->dji[DJI_MOTOR_WHEEL_RGT];
+    rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_LFT] = applied.dji[DJI_MOTOR_WHEEL_LFT];
+    rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_RGT] = applied.dji[DJI_MOTOR_WHEEL_RGT];
 
-    output_debug_dm_sent = (uint8_t)(Dm_Send_Torque(torque->dm) == HAL_OK);
-    /* 物理左右轮反馈源交叉: RL 左/右轮输出也交叉到实际电机槽 */
+    output_debug_dm_sent = (uint8_t)(Dm_Send_Torque(applied.dm) == HAL_OK);
     output_debug_dji_sent = (uint8_t)(Dji_Send_Wheel_Torque(
-        torque->dji[DJI_MOTOR_WHEEL_RGT], torque->dji[DJI_MOTOR_WHEEL_LFT]) == HAL_OK);
+        applied.dji[DJI_MOTOR_WHEEL_LFT], applied.dji[DJI_MOTOR_WHEEL_RGT]) == HAL_OK);
         // (void)Dm_Send_Zero();
         // (void)Dji_All_Stop();
 }
@@ -159,20 +247,15 @@ static void solve_lqr(torque_output_t *torque)
 /* RL: 动作 → 力矩; 前提: 遥控使能 + 电机使能 + 两腿有效 + 推理动作可用 */
 static void solve_rl(const float wheel_vel[2], torque_output_t *torque)
 {
-    float wheel_vel_rl[2];
-
     if (!(robot_state.rc_enable && robot_state.motor_enabled
           && leg_l.output.valid && leg_r.output.valid
           && action_state.rl_ready))
     {
         return;
     }
-    /* RL 输入核对确认左右轮反馈源交叉，PD 轮速也按物理侧重排。 */
-    wheel_vel_rl[DJI_MOTOR_WHEEL_LFT] = wheel_vel[DJI_MOTOR_WHEEL_RGT];
-    wheel_vel_rl[DJI_MOTOR_WHEEL_RGT] = wheel_vel[DJI_MOTOR_WHEEL_LFT];
     if (RL_Torque_Compute(&leg_l, &leg_r,
         &rl_control.torque_param[rl_control.policy.selected_model],
-        wheel_vel_rl, action_state.a, &rl_control.torque_state, torque) == 0u)
+        wheel_vel, action_state.a, &rl_control.torque_state, torque) == 0u)
     {
         /* 失败: 零力矩 */
         torque->valid = 0u;
@@ -187,7 +270,10 @@ void output_task_body(void)
     float wheel_vel[2];
     ctrl_strategy_t strategy;
     torque_output_t torque;
+    torque_output_t sent_torque;
+    uint8_t i;
 
+    output_leg_test_update();
     wheel_vel[0] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
     wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
 
@@ -243,9 +329,21 @@ void output_task_body(void)
         uint64_t queue_ns = Mono_Ns_Get();
 
         output_dispatch(&torque);
+        output_rl_diag_update(&torque, queue_ns);
         if (JointUsb_ModeLock() || JointUsb_StreamRequested())
         {
-            JointUsb_ActuationTick(&torque, queue_ns, output_debug_dm_sent);
+            /* 记录最终命令 */
+            Torque_Output_Clear(&sent_torque);
+            sent_torque.valid = 1u;
+            for (i = 0u; i < DM_MOTOR_NUM; i++)
+            {
+                sent_torque.dm[i] = rl_output_dm_cmd_nm[i];
+            }
+            for (i = 0u; i < DJI_MOTOR_NUM; i++)
+            {
+                sent_torque.dji[i] = rl_output_wheel_cmd_nm[i];
+            }
+            JointUsb_ActuationTick(&sent_torque, queue_ns, output_debug_dm_sent);
         }
     }
 }

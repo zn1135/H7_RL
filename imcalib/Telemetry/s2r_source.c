@@ -15,8 +15,8 @@
  * 也不改动现有任务逻辑。序号与时间戳全部由本模块自行维护。
  * ==========================================================================*/
 
-/* 轮序: 协议/RL 电机槽 [4]=左轮←物理 RGT, [5]=右轮←物理 LFT (同 RL 输入交叉) */
-static const uint8_t wheel_source[2] = {DJI_MOTOR_WHEEL_RGT, DJI_MOTOR_WHEEL_LFT};
+/* 轮序: [4] 左轮, [5] 右轮。 */
+static const uint8_t wheel_source[2] = {DJI_MOTOR_WHEEL_LFT, DJI_MOTOR_WHEEL_RGT};
 
 /* 采样状态: 变化检测基线 + 序号 */
 static struct {
@@ -149,7 +149,7 @@ static void sample_trace(s2r_control_sample_t *sample)
 
     /* 0~5 虚拟关节角 (轮角不参与, 同执行层) */
     memcpy(sample->values, q, sizeof(q));
-    /* 6~11 虚拟关节速度, 轮速按 RL 输入交叉来源 */
+    /* 6~11 虚拟关节速度 */
     sample->values[6] = leg_l.input.d_hip_f;
     sample->values[7] = leg_l.output.d_virtual_shank_angle;
     sample->values[8] = motor_state.dji.vel_rad_s[wheel_source[0]];
