@@ -11,12 +11,12 @@
 
 typedef struct {
     volatile uint8_t requested;
-    uint8_t active;
+    volatile uint8_t active;
 } vofa_transport_t;
 
 extern vofa_transport_t vofa_transport;
 
-/* 默认 UART；requested/active: 1=UART，0=USB CDC。失能且空闲时切换。 */
+/* 默认 UART8，USB CDC 交给 JID1；requested/active: 1=UART，0=USB CDC。 */
 /* UART 端口随 MACHINE_DEFAULT 自动切换。 */
 /*   8 = UART8  (1152000, TX DMA 正常)                */
 /*   1 = USART1 (1152000, TX DMA 正常)                */

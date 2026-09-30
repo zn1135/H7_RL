@@ -1,12 +1,12 @@
 # 整机诊断串口接线、采集与验收
 
-本次接入在 `little-wheelleg` 分支完成（自 `a824da1` 起，变更 104），与现有控制代码**去耦**：`imcalib/Telemetry/` 只读现有状态，任务层只有 `commTask` 里的 `S2R_Pump()` 一个挂点。协议布局见 [sim2real_serial_protocol.md](sim2real_serial_protocol.md)；哪些字段本分支拿不到，以 META 的 `unavailable` / `derived` 两栏为准。当前上电默认通过 UART8 发送 [普通 VOFA JustFloat](vofa_policy_trace.md)；本页的 S2R1 二进制采集仅在显式切换后适用。
+本次接入在 `little-wheelleg` 分支完成（自 `a824da1` 起，变更 104），与现有控制代码**去耦**：`imcalib/Telemetry/` 只读现有状态，任务层只有 `commTask` 里的 `S2R_Pump()` 一个挂点。协议布局见 [sim2real_serial_protocol.md](sim2real_serial_protocol.md)；哪些字段本分支拿不到，以 META 的 `unavailable` / `derived` 两栏为准。当前测试固件上电通过 UART8 发送 [普通 VOFA JustFloat](vofa_policy_trace.md)，USB CDC 留给 `JID1`；本页的 S2R1 二进制采集仅在显式切换后适用。
 
 ## 1. 接线和准备
 
-- 默认使用 UART8：板端 PE1（TX）经原无线串口链路接电脑，选择该链路对应的 COM 口。板载 USB CDC 仍可在后续切换测试，现状见 [传输说明](usb-cdc-telemetry.md)。
+- 默认遥测使用 UART8：板端 PE1（TX）经原无线串口链路接电脑，USB CDC 当前供 `JID1` 使用。切换 USB 遥测见 [传输说明](usb-cdc-telemetry.md)。
 - USB CDC 的 1152000、8N1 是 line coding，USB 传输速率不由此控制；UART8 按实际 1152000、8N1、无流控运行。VOFA+ 与本工具不能同时占用同一 COM 口。
-- 遥测口上电默认发普通 VOFA JustFloat，固定通道可由 VOFA+ 接收并保存 CSV。若要使用本页 S2R1 二进制流程，需在失能、无会话且发送完成时把 `s2r_diagnostic_requested` 写 1，并改用 `tools/s2r_capture.py`；两种协议互斥。UART7 仍接 IMU，UART9 仍接遥控。无诊断串口启动电机/策略指令。
+- 遥测口上电默认经 UART8 发普通 VOFA JustFloat，固定通道可由 VOFA+ 接收并保存 CSV。若要使用本页 S2R1 二进制流程，需在失能、无会话且发送完成时把 `s2r_diagnostic_requested` 写 1，并改用 `tools/s2r_capture.py`；两种协议互斥。UART7 仍接 IMU，UART9 仍接遥控。无诊断串口启动电机/策略指令。
 
 采集工具不改变任何控制路径；要采集网络策略，按原有流程（左上挡 + 右中位）投入推理。
 
@@ -56,7 +56,7 @@ python -m pip install pyserial
 Linux，采集 20 秒：
 
 ```bash
-python tools/s2r_capture.py --port /dev/ttyUSB0 --baud 1152000 --seconds 20 --output /tmp/s2r_capture_01
+python tools/s2r_capture.py --port /dev/ttyACM0 --baud 1152000 --seconds 20 --output /tmp/s2r_capture_01
 ```
 
 Windows，将设备改成实际 COM 口、输出改成新目录：

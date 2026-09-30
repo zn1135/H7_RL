@@ -1,6 +1,6 @@
 # VOFA 采集与模式切换
 
-遥测口上电默认通过机器表指定的 UART8 PE1 发送普通 32 通道 JustFloat，电脑连接原无线串口对应的 COM 口，设置 1152000、8N1。每帧为 32 个小端 float32 和 `00 00 80 7F` 帧尾，共 132 字节。`vofa_transport.requested/active` 中 1 为默认 UART，0 为板载 USB CDC；有线测试现状见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。S2R1 二进制流上电不占口，VOFA+ 可按 JustFloat 解析当前普通帧。
+当前测试固件上电通过 UART8 发送普通 32 通道 JustFloat，USB CDC 留给 `JID1` 双向通信；电脑选择原 UART8 转接器对应的 COM 口，设置 1152000、8N1。每帧为 32 个小端 float32 和 `00 00 80 7F` 帧尾，共 132 字节。`vofa_transport.requested/active` 中 1 为默认 UART8，0 为 USB CDC 遥测；有线 VOFA 实测记录见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。S2R1 二进制流上电不占口，VOFA+ 可按 JustFloat 解析当前普通帧。
 
 ## 普通 VOFA（上电默认）
 
@@ -32,7 +32,7 @@ ch5 状态位（低 24 位）：0 已投入、1 观测有效、2 历史有效、
 
 ## 采集与验收
 
-连续发送基线为 `2 × 132 × 100 = 26.4 kB/s`，每秒五帧历史再加 `0.66 kB/s`，合计约 **27.1 kB/s**。默认 UART8 在 1152000、8N1 下的理论有效字节上限为 115.2 kB/s，无线转接设备的实际吞吐需实测。板载 USB CDC 的 line coding 不决定 USB 链路速率。无论选择哪条链路，都以本机采集的序号缺口与历史同步结果验收。
+策略追踪连续发送基线为 `2 × 132 × 100 = 26.4 kB/s`，每秒五帧历史再加 `0.66 kB/s`，合计约 **27.1 kB/s**。UART8 回退口在 1152000、8N1 下的理论有效字节上限为 115.2 kB/s，无线转接设备的实际吞吐需实测。板载 USB CDC 的 line coding 不决定 USB 链路速率。无论选择哪条链路，都以本机采集的序号缺口与历史同步结果验收。
 
 ### 直接接收原始字节
 

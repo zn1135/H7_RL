@@ -166,7 +166,8 @@ uint8_t JointUsb_ModeLock(void)
 
 uint8_t JointUsb_StreamRequested(void)
 {
-    return stream_requested;
+    return (uint8_t)(vofa_transport.active != VOFA_TRANSPORT_USB
+        && stream_requested);
 }
 
 static void abort_run(void)
@@ -182,7 +183,8 @@ uint8_t JointUsb_EnableAllowed(void)
     uint64_t now;
 
     now = Mono_Ns_Get();
-    return (uint8_t)(armed && !latched && stream_requested && limits_valid()
+    return (uint8_t)(vofa_transport.active != VOFA_TRANSPORT_USB
+        && armed && !latched && stream_requested && limits_valid()
         && JointUsb_PhysicalPermit() && CDC_Configured_HS()
         && ctrl_fault == FAULT_NONE && !robot_state.fallen
         && torque_output_enabled
@@ -229,6 +231,10 @@ void JointUsb_RxIsr(const uint8_t *data, uint32_t len)
     uint16_t next;
     uint64_t packet_ns;
 
+    if (vofa_transport.active == VOFA_TRANSPORT_USB)
+    {
+        return;
+    }
     packet_ns = Mono_Ns_Get();
     for (i = 0u; i < len; i++)
     {
@@ -461,6 +467,19 @@ void JointUsb_Process(void)
     uint8_t byte;
     uint64_t byte_ns;
 
+    if (vofa_transport.active == VOFA_TRANSPORT_USB)
+    {
+        if (armed)
+        {
+            abort_run();
+        }
+        stream_requested = 0u;
+        reply_pending = 0u;
+        rx_tail = rx_head;
+        parse_len = 0u;
+        rx_overflow = 0u;
+        return;
+    }
     if (rc_command.s1 == DR16_SW_DOWN)
     {
         armed = 0u;

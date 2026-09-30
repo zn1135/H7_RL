@@ -327,14 +327,6 @@ void comm_task_body(void)
     Leg_State_Update();
     WS2812_RainbowBlink();
     Remote_Control_Update();
-    if (CDC_Configured_HS())
-    {
-        vofa_transport.requested = VOFA_TRANSPORT_UART;
-        if (Vofa_Transport_Update((uint8_t)!robot_state.motor_enabled))
-        {
-            Vofa_Trace_Discard();
-        }
-    }
     JointUsb_Process();
     Robot_Fallen_Update();
     Robot_Fault_Update();
@@ -348,7 +340,8 @@ void comm_task_body(void)
     }
     else
     {
-        if (Vofa_Transport_Update((uint8_t)!robot_state.motor_enabled))
+        if (Vofa_Transport_Update((uint8_t)(!robot_state.motor_enabled
+            && !JointUsb_ModeLock() && !JointUsb_StreamRequested())))
         {
             Vofa_Trace_Discard();
         }
