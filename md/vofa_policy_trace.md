@@ -1,31 +1,12 @@
 # VOFA 采集与模式切换
 
-本分支默认通过 UART8 发送普通 32 通道 JustFloat，USB CDC 留给 `JID1` 双向通信；电脑选择原 UART8 转接器对应的 COM 口，设置 1152000、8N1。每帧为 32 个小端 float32 和 `00 00 80 7F` 帧尾，共 132 字节。`vofa_transport.requested/active` 中 1 为默认 UART8，0 为 USB CDC 遥测；有线 VOFA 历史实测记录见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。S2R1 二进制流上电不占口。此处新通道布局已编译链接，待烧录后用 VOFA+ 实测。
+当前测试固件上电通过 UART8 发送普通 32 通道 JustFloat，USB CDC 留给 `JID1` 双向通信；电脑选择原 UART8 转接器对应的 COM 口，设置 1152000、8N1。每帧为 32 个小端 float32 和 `00 00 80 7F` 帧尾，共 132 字节。`vofa_transport.requested/active` 中 1 为默认 UART8，0 为 USB CDC 遥测；有线 VOFA 实测记录见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。S2R1 二进制流上电不占口，VOFA+ 可按 JustFloat 解析当前普通帧。
 
 ## 普通 VOFA（上电默认）
 
-`task_comm.c::Robot_Control_Send_Vofa()` 约 50 Hz 发送。VOFA+ 选择 JustFloat、32 通道。ch0～24 固定对应策略当前 25 维观测 `obs[0..24]`，可直接画曲线；从策略状态取同一份快照，不重新做传感器轴映射。具体顺序如下：
+`task_comm.c::Robot_Control_Send_Vofa()` 约 50 Hz 发送。VOFA+ 选择 JustFloat、32 通道：ch0 是在线掩码，ch1 是状态位，ch2 是 RL 状态位；ch3～5 是 `imu_state.euler_rad[0..2]`，ch6～8 是 `gyro_rad_s[0..2]`，ch9～11 是 `acc_g[0..2]`，ch12～14 是 RL 观测中的投影重力 XYZ。ch15～31 当前未赋值，不能按历史布局解释。轴来源和符号以 `machine_config.c` 当前机器表为准，未凭通道号确认物理极性。
 
-| VOFA 通道 | 策略观测 | 含义 |
-| --- | --- | --- |
-| ch0～2 | obs0～2 | 机体系角速度 XYZ，乘 0.25 |
-| ch3～5 | obs3～5 | 投影重力 XYZ；直立时 Z 约为 −1 |
-| ch6～8 | obs6～8 | 前向速度、偏航角速度、目标高度命令，分别乘 2、0.25、5 |
-| ch9～12 | obs9～12 | 左大腿、左虚拟小腿、右大腿、右虚拟小腿相对默认角 |
-| ch13～18 | obs13～18 | 左大腿、左虚拟小腿、左轮、右大腿、右虚拟小腿、右轮角速度，乘 0.05 |
-| ch19～24 | obs19～24 | 相同顺序的上一拍训练空间动作 |
-
-| VOFA 通道 | 状态值 |
-| --- | --- |
-| ch25 | 观测有效：1 有效，0 无效；无效时观测被清零 |
-| ch26 | 五帧历史已准备：1 是，0 否 |
-| ch27 | 电机使能：1 是，0 否 |
-| ch28 | RL 已投入：1 是，0 否 |
-| ch29 | `ctrl_fault` 故障位值 |
-| ch30 | HPI1 上位机模式锁：1 锁定，0 未锁定 |
-| ch31 | 发送尝试序号，模 2²⁴；跳号表示尝试发送时传输口忙等情况 |
-
-普通 VOFA 每 20 次 `commTask` 调用取一帧，低于策略约 100 Hz 的观测更新率，不能恢复每一拍观测或 125 维历史。采集每拍观测与历史仍用下文策略追踪模式。普通 VOFA 没有策略帧类型和 MCU 时间戳，不能交给策略追踪解码脚本；轴来源和物理极性仍以机器配置及台架实测为准。
+普通 VOFA 不含策略帧类型、序号和 MCU 时间戳，不能交给下文的策略追踪解码脚本。若只需查看这些通道，在 VOFA+ 直接画 ch3～14。
 
 电机失能且上一帧发送完成时，将 `vofa_trace_requested` 写 1 可切到下文的策略追踪；写 0 返回普通 VOFA。两种布局应分别保存采集文件。将 `s2r_diagnostic_requested` 写 1 可切到 S2R1 二进制流；它与 VOFA 互斥，VOFA+ 不能解析 S2R1。
 

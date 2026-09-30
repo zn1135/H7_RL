@@ -12,11 +12,9 @@
 #include "../Telemetry/s2r_telemetry.h"
 #include "../Telemetry/vofa_trace.h"
 #include "../Telemetry/joint_usb.h"
-#include "../Telemetry/host_policy_usb.h"
 #include "usbd_cdc_if.h"
 
 #include <math.h>
-#include <string.h>
 
 /* 更新电机状态 */
 static void Motor_State_Update(void)
@@ -171,11 +169,7 @@ static void Robot_Enable_Update(void)
 
     enable_request = (uint8_t)(robot_state.rc_enable
         && ctrl_fault == FAULT_NONE && !robot_state.fallen);
-    if (HostPolicy_ModeLock())
-    {
-        enable_request = HostPolicy_EnableAllowed();
-    }
-    else if (JointUsb_ModeLock())
+    if (JointUsb_ModeLock())
     {
         enable_request = JointUsb_EnableAllowed();
     }
@@ -201,12 +195,21 @@ static void Robot_Enable_Update(void)
     }
 }
 
-/* 普通 VOFA: 25 维观测与状态。 */
+/*
+ * VOFA 观测帧 (JustFloat, 32 通道)
+ * ch0 在线掩码；ch1 状态位；ch2 RL 状态位。
+ * ch3~5 欧拉角；ch6~8 角速度；ch9~11 加速度；
+ * ch12~14 RL 投影重力；ch15~31 当前未赋值。
+ * 每二十次 commTask 周期发送一次。
+ * LQR 布局(状态 x/target/腿长/u)在下方注释里备查。
+ */
 static void Robot_Control_Send_Vofa(void)
 {
     static float dbg[VOFA_MAX_CH];
     static uint8_t send_div;
-    static uint32_t send_seq;
+    uint8_t online_mask;
+    uint16_t state_bits;
+    uint32_t rl_bits;
 
     if (++send_div < 20u)
     {
@@ -214,17 +217,103 @@ static void Robot_Control_Send_Vofa(void)
     }
     send_div = 0u;
 
-    taskENTER_CRITICAL();
-    memcpy(dbg, rl_control.observation.obs, RL_OBS_SIZE * sizeof(float));
-    dbg[25] = (float)rl_control.observation.valid;
-    dbg[26] = (float)rl_control.observation.history_ready;
-    dbg[27] = (float)robot_state.motor_enabled;
-    dbg[28] = (float)output_task_rl_engaged();
-    dbg[29] = (float)ctrl_fault;
-    dbg[30] = (float)HostPolicy_ModeLock();
-    taskEXIT_CRITICAL();
-    dbg[31] = (float)((++send_seq) & 0x00FFFFFFu);
-    (void)Vofa_Send(dbg, VOFA_MAX_CH);
+    /* ch0 在线掩码 */
+    online_mask  = imu_state.online ? 0x01u : 0x00u;
+    online_mask |= DR16_Online() ? 0x02u : 0x00u;
+    online_mask |= motor_state.dm.online[0] ? 0x04u : 0x00u;
+    online_mask |= motor_state.dm.online[1] ? 0x08u : 0x00u;
+    online_mask |= motor_state.dm.online[2] ? 0x10u : 0x00u;
+    online_mask |= motor_state.dm.online[3] ? 0x20u : 0x00u;
+    online_mask |= motor_state.dji.online[0] ? 0x40u : 0x00u;
+    online_mask |= motor_state.dji.online[1] ? 0x80u : 0x00u;
+    dbg[0] = (float)online_mask;
+
+    /* ch1 状态位: 使能/跌倒/左腿有效/右腿有效/四髋使能/已投入 */
+    state_bits  = robot_state.motor_enabled ? 0x01u : 0x00u;
+    state_bits |= robot_state.fallen ? 0x02u : 0x00u;
+    state_bits |= leg_l.output.valid ? 0x04u : 0x00u;
+    state_bits |= leg_r.output.valid ? 0x08u : 0x00u;
+    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_F_LFT) ? 0x10u : 0x00u;
+    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_B_LFT) ? 0x20u : 0x00u;
+    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_F_RGT) ? 0x40u : 0x00u;
+    state_bits |= Dm_Is_Enabled(DM_MOTOR_LEG_B_RGT) ? 0x80u : 0x00u;
+    state_bits |= output_task_lqr_engaged() ? 0x100u : 0x00u;
+    state_bits |= output_task_rl_engaged() ? 0x200u : 0x00u;
+    dbg[1] = (float)state_bits;
+
+    rl_bits  = rl_control.policy.ready ? 0x01u : 0x00u;
+    rl_bits |= rl_control.observation.history_ready ? 0x02u : 0x00u;
+    rl_bits |= action_state.rl_ready ? 0x04u : 0x00u;
+    rl_bits |= output_task_rl_engaged() ? 0x08u : 0x00u;
+    rl_bits |= rl_control.observation.valid ? 0x40u : 0x00u;
+    rl_bits |= machine->rl.configured ? 0x80u : 0x00u;
+    rl_bits |= (rl_control.policy.run_fail & 0xFFu) << 8;
+    rl_bits |= output_debug_dm_sent ? 0x00010000u : 0x00u;
+    rl_bits |= output_debug_dji_sent ? 0x00020000u : 0x00u;
+    dbg[2] = (float)rl_bits;
+
+
+    // dbg[3]  = imu_state.euler_rad[0];
+    // dbg[4]  = imu_state.euler_rad[1];
+    // dbg[5]  = imu_state.euler_rad[2];
+    // dbg[6]  = imu_state.gyro_rad_s[0];
+    // dbg[7]  = imu_state.gyro_rad_s[1];
+    // dbg[8]  = imu_state.gyro_rad_s[2];
+    dbg[9]  = rl_control.observation.obs[0];
+    dbg[10] = rl_control.observation.obs[1];
+    dbg[11] = rl_control.observation.obs[2];
+    dbg[12] = rl_control.observation.obs[3];
+    dbg[13] = rl_control.observation.obs[4];
+    dbg[14] = rl_control.observation.obs[5];
+    /* RL 观测/出力布局 (a824da1 曾注释, 2026-09-27 恢复) */
+    // for (i = 0u; i < DM_MOTOR_NUM; i++)
+    // {
+    //     dbg[3u + i] = rl_output_dm_cmd_nm[i];
+    //     dbg[9u + i] = motor_state.dm.trq_nm[i];
+    //     dbg[13u + i] = rl_control.observation.obs[RL_OBS_L_THIGH + i];
+    // }
+    // dbg[7] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_LFT];
+    // dbg[8] = rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_RGT];
+    // for (i = 0u; i < DJI_MOTOR_NUM; i++)
+    // {
+    //     dbg[29u + i] = motor_state.dji.current_raw[
+    //         (i == DJI_MOTOR_WHEEL_LFT) ? DJI_MOTOR_WHEEL_RGT : DJI_MOTOR_WHEEL_LFT];
+    // }
+    // for (i = 0u; i < RL_ACTION_SIZE; i++)
+    // {
+    //     dbg[17u + i] = rl_control.observation.obs[RL_OBS_L_THIGH_VEL + i];
+    //     dbg[23u + i] = rl_control.observation.obs[RL_OBS_LAST_ACTION + i];
+    // }
+    // if (!robot_state.motor_enabled)
+    // {
+    //     dbg[23] = (float)huart9.RxState;
+    //     dbg[24] = (float)hdma_uart9_rx.State;
+    //     dbg[25] = (float)__HAL_DMA_GET_COUNTER(&hdma_uart9_rx);
+    //     dbg[26] = (float)dbus_rx.dma_pos;
+    //     dbg[27] = (float)dbus_rx.isr_len;
+    //     dbg[28] = (float)dr16.last_rx_tick;
+    // }
+    // dbg[31] = (float)ctrl_fault;   /* 0x10 = FAULT_ACTION */
+
+    // dbg[31] = (float)rl_control.policy.run_us;
+
+    /* LQR 布局备查 (要用就整段换回)
+    for (i = 0u; i < 10u; i++)
+    {
+        dbg[3+i]  = lqr_state.x[i];
+        dbg[13+i] = lqr_state.target[i];
+    }
+    for (i = 0u; i < 2u; i++)
+    {
+        dbg[23+i] = lqr_state.len[i];
+        dbg[25+i] = lqr_state.leg_len_tgt[i];
+    }
+    for (i = 0u; i < 4u; i++)
+    {
+        dbg[27+i] = lqr_state.u[i];
+    }
+    */
+    Vofa_Send(dbg, 32u);
 }
 
 /* 通信单周期 */
@@ -239,15 +328,10 @@ void comm_task_body(void)
     WS2812_RainbowBlink();
     Remote_Control_Update();
     JointUsb_Process();
-    HostPolicy_Process();
     Robot_Fallen_Update();
     Robot_Fault_Update();
     Robot_Enable_Update();
-    HostPolicy_Pump();
-    if (!HostPolicy_ModeLock())
-    {
-        JointUsb_Pump();
-    }
+    JointUsb_Pump();
     /* 同口互斥：S2R > 策略 VOFA > 普通 VOFA；切换条件见 md/vofa_policy_trace.md。 */
     s2r_active = S2R_Pump();
     if (s2r_active)
@@ -257,8 +341,7 @@ void comm_task_body(void)
     else
     {
         if (Vofa_Transport_Update((uint8_t)(!robot_state.motor_enabled
-            && !JointUsb_ModeLock() && !JointUsb_StreamRequested()
-            && !HostPolicy_ModeLock())))
+            && !JointUsb_ModeLock() && !JointUsb_StreamRequested())))
         {
             Vofa_Trace_Discard();
         }

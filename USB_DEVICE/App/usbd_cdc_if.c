@@ -24,7 +24,6 @@
 /* USER CODE BEGIN INCLUDE */
 #include <string.h>
 #include "joint_usb.h"
-#include "host_policy_usb.h"
 
 /* USER CODE END INCLUDE */
 
@@ -291,12 +290,10 @@ static int8_t CDC_Receive_HS(uint8_t* Buf, uint32_t *Len)
     joint_usb_cdc_debug.rx_packets++;
     joint_usb_cdc_debug.rx_bytes += *Len;
     JointUsb_RxIsr(Buf, *Len);
-    HostPolicy_RxIsr(Buf, *Len);
   }
   else
   {
     JointUsb_RxOverflowIsr();
-    HostPolicy_RxOverflowIsr();
   }
   USBD_CDC_SetRxBuffer(&hUsbDeviceHS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceHS);

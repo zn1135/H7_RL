@@ -1336,11 +1336,6 @@
               <FileType>1</FileType>
               <FilePath>../imcalib/Telemetry/joint_usb.c</FilePath>
             </File>
-            <File>
-              <FileName>host_policy_usb.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../imcalib/Telemetry/host_policy_usb.c</FilePath>
-            </File>
           </Files>
         </Group>
         <Group>

@@ -925,7 +925,7 @@ static void build_meta(void)
     json_append("\"transport\":\"%s\",\"usb_dma\":%s,\"uart\":%d,\"baud\":1152000,\"format\":\"8N1\",\"policy_period_us\":%u,\"control_period_us\":%u,", vofa_transport.active == VOFA_TRANSPORT_USB ? "usb_cdc" : "uart", vofa_transport.active == VOFA_TRANSPORT_USB && hpcd_USB_OTG_HS.Init.dma_enable ? "true" : "false", (int)MACHINE_VOFA_PORT, (unsigned)(1000000u / S2R_POLICY_HZ), (unsigned)S2R_CONTROL_PERIOD_US);
     json_append("\"rate_profile\":%u,\"rates_hz\":{\"POLICY\":%u,\"CONTROL\":%u,\"IMU\":%u,\"HEALTH\":%u},\"history_period_us\":%u,", (unsigned)S2R_RATE_LOW, (unsigned)S2R_POLICY_HZ, (unsigned)S2R_CONTROL_HZ, (unsigned)S2R_IMU_HZ, (unsigned)S2R_HEALTH_HZ, (unsigned)S2R_HISTORY_PERIOD_US);
     json_append("\"period_semantics\":\"policy tick from TIM6 divided by MACHINE_POLICY_DIV; all periods sampled by commTask (1 ms quantization), actual period in HEALTH\",");
-    json_append("\"source\":\"S2R sampler is read-only; HPI1 host control uses a separate USB module\",");
+    json_append("\"source\":\"imcalib/Telemetry decoupled sampler, read-only; existing control code unchanged\",");
     json_append("\"sampled_at\":\"commTask 1 kHz\",\"control_frame\":\"period S2R_CONTROL_PERIOD_US of last actuation state; internal loop timing not observable\",");
     json_append("\"record\":{\"buffer_bytes\":%u,\"hz\":%u,\"dump_period_us\":%u,\"trigger\":\"auto: session begin (arm) starts, session end + tail stops, then slow dump; debugger writes override\",\"flags\":[\"RECORDING\",\"REPLAYING\"],\"event_codes\":{\"RECORD_START\":9,\"RECORD_STOP\":10,\"DUMP_END\":11}},",
         (unsigned)S2R_RECORD_BYTES, (unsigned)(1000000u / S2R_RECORD_PERIOD_US), (unsigned)S2R_DUMP_PERIOD_US);

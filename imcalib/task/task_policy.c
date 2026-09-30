@@ -5,7 +5,6 @@
 #include "pid.h"
 #include "mono_ns.h"
 #include "../Telemetry/vofa_trace.h"
-#include "../Telemetry/host_policy_usb.h"
 
 #include <string.h>
 
@@ -167,25 +166,6 @@ static void RL_Infer_Body(void)
     float inference_us = 0.0f;
 
     RL_Command_From_Rc(command);
-    if (HostPolicy_ModeLock())
-    {
-        if (!HostPolicy_Armed())
-        {
-            warmup_cnt = 0u;
-            RL_Observation_Reset(&rl_control.observation);
-            RL_Action_Publish(action, 0u);
-            return;
-        }
-        HostPolicy_LastTrainingAction(action_t);
-        RL_Observation_Set_Last_Action(&rl_control.observation, action_t);
-        if (RL_Control_Update_Observation(command, &used_imu, &obs_time_us))
-        {
-            HostPolicy_SubmitInput(rl_control.observation.obs,
-                                   rl_control.observation.history, command,
-                                   obs_time_us);
-        }
-        return;
-    }
     engaged = output_task_rl_engaged();
 
     /* 未投入: 清历史 (预览观测照算供 VOFA), 发零动作保持新鲜 (LQR 挡也走这里) */
