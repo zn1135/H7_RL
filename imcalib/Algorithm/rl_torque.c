@@ -1,4 +1,5 @@
 #include "rl_torque.h"
+#include "gas_spring.h"
 #include "machine_config.h"
 #include "robot_control.h"
 
@@ -23,60 +24,6 @@ enum {
     VJ_R_WHEEL = 5,
     VJ_NUM     = 6,
 };
-
-typedef struct {
-    float upper[3];
-    float hinge[3];
-    float lower[3];
-    float axis_y;
-} gas_spring_geom_t;
-
-/* chuanliantui.xml 的气弹簧端点 */
-static const gas_spring_geom_t gas_spring_geom[2] = {
-    {
-        {0.02560606f, 0.00350000f, -0.03710530f},
-        {-0.16528873f, -0.01150000f, -0.12953623f},
-        {0.01969256f, -0.01000000f, -0.04446437f},
-        -1.0f,
-    },
-    {
-        {0.02560606f, -0.00350000f, -0.03710530f},
-        {-0.16528873f, 0.01150000f, -0.12953623f},
-        {0.01969256f, 0.01000000f, -0.04446437f},
-        1.0f,
-    },
-};
-
-/* 端点连线推力转虚拟小腿力矩 */
-static float RL_Gas_Spring_Shank_Torque(uint8_t side, float q, float force_n)
-{
-    const gas_spring_geom_t *geom;
-    float angle;
-    float x_rot;
-    float z_rot;
-    float dx;
-    float dy;
-    float dz;
-    float length;
-
-    if (side >= 2u || !isfinite(q) || !isfinite(force_n) || force_n <= 0.0f)
-    {
-        return 0.0f;
-    }
-    geom = &gas_spring_geom[side];
-    angle = geom->axis_y * q;
-    x_rot = cosf(angle) * geom->lower[0] + sinf(angle) * geom->lower[2];
-    z_rot = -sinf(angle) * geom->lower[0] + cosf(angle) * geom->lower[2];
-    dx = geom->hinge[0] + x_rot - geom->upper[0];
-    dy = geom->hinge[1] + geom->lower[1] - geom->upper[1];
-    dz = geom->hinge[2] + z_rot - geom->upper[2];
-    length = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (!isfinite(length) || length < 0.001f)
-    {
-        return 0.0f;
-    }
-    return force_n * geom->axis_y * (dx * z_rot - dz * x_rot) / length;
-}
 
 /* 检查数组 */
 static uint8_t RL_Torque_Array_Finite(const float *data, uint32_t count)
@@ -171,11 +118,8 @@ uint8_t RL_Torque_Compute(const leg_state_t *leg_l, const leg_state_t *leg_r,
     float q[VJ_NUM];
     float qd[VJ_NUM];
     float tau_v[VJ_NUM];
-    float tau_f[2];
-    float tau_b[2];
-    float shank_tau[2];
-    float q_train[2];
-    const rl_map_t *map;
+    float base_dm[4];
+    float raw_dm[4];
     float leg_limit;
     float wheel_limit;
 
@@ -261,37 +205,24 @@ uint8_t RL_Torque_Compute(const leg_state_t *leg_l, const leg_state_t *leg_r,
     }
     memcpy(state->virtual_torque, tau_v, sizeof(state->virtual_torque));
 
-    /* 补偿符号按机器表，0 时关闭 */
-    map = &machine->rl;
-    shank_tau[0] = tau_v[VJ_L_SHANK];
-    shank_tau[1] = tau_v[VJ_R_SHANK];
-    if (map->configured && machine->gas_comp_sign[0] != 0)
-    {
-        q_train[0] = (float)map->sign[VJ_L_SHANK]
-                   * Angle_Wrap_180(q[VJ_L_SHANK] - map->zero[1]);
-        shank_tau[0] += (float)(map->sign[VJ_L_SHANK] * machine->gas_comp_sign[0])
-                      * RL_Gas_Spring_Shank_Torque(0u, q_train[0], machine->gas_spring_force_n[0]);
-    }
-    if (map->configured && machine->gas_comp_sign[1] != 0)
-    {
-        q_train[1] = (float)map->sign[VJ_R_SHANK]
-                   * Angle_Wrap_180(q[VJ_R_SHANK] - map->zero[3]);
-        shank_tau[1] += (float)(map->sign[VJ_R_SHANK] * machine->gas_comp_sign[1])
-                      * RL_Gas_Spring_Shank_Torque(1u, q_train[1], machine->gas_spring_force_n[1]);
-    }
+    /* 补偿前力矩 */
+    base_dm[0] = tau_v[VJ_L_THIGH] + tau_v[VJ_L_SHANK] * leg_l->output.vshank_jac[1];
+    base_dm[1] = tau_v[VJ_L_SHANK] * leg_l->output.vshank_jac[0];
+    base_dm[2] = tau_v[VJ_R_THIGH] + tau_v[VJ_R_SHANK] * leg_r->output.vshank_jac[1];
+    base_dm[3] = tau_v[VJ_R_SHANK] * leg_r->output.vshank_jac[0];
 
-    /* 虚拟力矩映射: vshank_jac[0]→后髋, [1]→前髋 */
-    tau_f[0] = tau_v[VJ_L_THIGH] + shank_tau[0] * leg_l->output.vshank_jac[1];
-    tau_b[0] = shank_tau[0] * leg_l->output.vshank_jac[0];
-    tau_f[1] = tau_v[VJ_R_THIGH] + shank_tau[1] * leg_r->output.vshank_jac[1];
-    tau_b[1] = shank_tau[1] * leg_r->output.vshank_jac[0];
+    /* 独立补偿叠加 */
+    if (!Gas_Spring_Apply(leg_l, leg_r, base_dm, raw_dm))
+    {
+        return 0u;
+    }
 
     /* DM 输出 (满限幅) */
     leg_limit = machine->dm_trq_clamp;
-    torque->dm[DM_MOTOR_LEG_F_LFT] = clampf(tau_f[0], -leg_limit, leg_limit);
-    torque->dm[DM_MOTOR_LEG_B_LFT] = clampf(tau_b[0], -leg_limit, leg_limit);
-    torque->dm[DM_MOTOR_LEG_F_RGT] = clampf(tau_f[1], -leg_limit, leg_limit);
-    torque->dm[DM_MOTOR_LEG_B_RGT] = clampf(tau_b[1], -leg_limit, leg_limit);
+    torque->dm[DM_MOTOR_LEG_F_LFT] = clampf(raw_dm[0], -leg_limit, leg_limit);
+    torque->dm[DM_MOTOR_LEG_B_LFT] = clampf(raw_dm[1], -leg_limit, leg_limit);
+    torque->dm[DM_MOTOR_LEG_F_RGT] = clampf(raw_dm[2], -leg_limit, leg_limit);
+    torque->dm[DM_MOTOR_LEG_B_RGT] = clampf(raw_dm[3], -leg_limit, leg_limit);
 
     /* DJI 输出 (满限幅) */
     wheel_limit = machine->dji_trq_clamp;

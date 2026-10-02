@@ -1276,6 +1276,11 @@
               <FileType>1</FileType>
               <FilePath>../imcalib/Algorithm/rl_torque.c</FilePath>
             </File>
+            <File>
+              <FileName>gas_spring.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/Algorithm/gas_spring.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

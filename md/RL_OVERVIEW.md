@@ -8,7 +8,7 @@
 - Keil 与 eIDE 已更新任务源目录和 `imcalib/task/inc` include 路径。
 - 已阅读姿态解算、`leg_solver`、观测构建；`rl_policy` 留待结合训练同学的模型参数共同检查。
 - `rl_torque` 保持动作、PID、雅可比和电机输出的直接链路。PID 直接逐个 `PID_struct_init`，不使用参数指针同步、循环初始化或隐式重配。
-- RL 力矩链按气弹簧两端点几何计算小腿被动力矩，左右补偿符号在机器表中独立配置，默认关闭；不加入斜率限制或额外控制策略。
+- 气弹簧采用同机器 Leg3 的 `Leg_SpringF(L)` 几何力模型，只补 F；原线性/端点多模式已删除，默认关闭，无新增调试状态或观测页。接口见 [gas-spring.md](gas-spring.md)。
 - 多次计算保持单一中间量和短表达式；注释简短。循环索引在 `for` 内定义。
 - 2026-09-22 起只有一个模型 `networkzn1`（chuanliantui 起立策略）；推理路径由 `machine->rl.configured` 门控直接运行（`rl_control.infer_enable` 开关与旧手动遥操路径已删除）；训练关节与固件关节的映射在机器表 `.rl`，未配置整链门控关。接入说明与训练侧待提供清单见 **§八**。
 
@@ -181,7 +181,7 @@ DM 反馈层已对右侧电机取反（`feedback_sign`），力矩下发按 `out
 - 左右轮极性在 `dji.c` 驱动边界按 `dji_sign.out` 处理，调用方不再取反
 - `task_actuation.c::output_dispatch()` 按左右原序调用 `Dji_Send_Wheel_Torque(...)`；驱动按反馈 ID 写入 `0x200` 对应电流槽
 
-PID 参数按模型存表，具体数值以 `RL_Torque_Param_Init()` 为准。控制器在总初始化和模型切换时逐个调用 `PID_struct_init`，不做运行时参数同步。气弹簧端点几何来自训练仓 `sim2sim/chuanliantui.xml`，`gas_spring_force_n[2]` 表示左右轴向推力，`gas_comp_sign[2]` 的 0 关闭、+1 叠加同向被动力矩、-1 抵消被动力矩；符号及端点安装一致性待台架确认。两份机器表当前 `gas_comp_sign` 均为 0（默认关闭），补偿仅在 `.rl` 已配置且符号非 0 时生效。补偿进入虚拟小腿力矩，再经原雅可比映射到四髋，当前不包含输出斜率限制。
+PID 参数按模型存表，具体数值以 `RL_Torque_Param_Init()` 为准。控制器在总初始化和模型切换时逐个调用 `PID_struct_init`，不做运行时参数同步。气弹簧现仅使用独立 `gas_spring.c` 内的 Leg3 同机 `Leg_SpringF(L)`：恒定轴向推力经挂点几何传动比得到等效腿长力，`Gas_Spring_Apply` 将负 Fs 映射为四髋增量并叠加，再由控制器做原限幅。作者已确认参数同机直接使用，原物理极性、零点和量程不变。原线性模型、训练角端点模型及多模式调试状态已删除；只保留默认关闭的编译开关，大机器启用后生效，小机器旁路。详见 [gas-spring.md](gas-spring.md)。
 
 **当前 PD 参数（以代码为准，来自训练仓库 `chuanliantui_config.py` control 段）**：腿 Kp 10 / Kd 1.0，轮速度增益 0.1（训练 damping），虚拟关节力矩先裁到训练上限 40 / 3.9 N·m（Isaac 在映射前裁），再经机器表 `dm_trq_clamp` / `dji_trq_clamp` 限幅。训练 PD 公式 `τ = Kp(目标 − q) + Kd(目标速度 − q̇)`，腿目标速度 0、轮 Kp 0，与固件实现一致。
 

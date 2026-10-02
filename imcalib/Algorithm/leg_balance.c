@@ -1,4 +1,5 @@
 #include "leg_balance.h"
+#include "gas_spring.h"
 
 #include <math.h>
 #include <string.h>
@@ -51,7 +52,8 @@ static uint8_t Leg_Balance_Output(leg_balance_t *lb, const leg_state_t *leg_l,
                                   const float Tp[2], const float wheel[2],
                                   torque_output_t *torque)
 {
-    float tau[2];
+    float base_dm[4];
+    float raw_dm[4];
     uint8_t i;
 
     memset(&lb->cmd, 0, sizeof(lb->cmd));   /* 失败时与零力矩一致 */
@@ -62,28 +64,25 @@ static uint8_t Leg_Balance_Output(leg_balance_t *lb, const leg_state_t *leg_l,
             return 0u;
         }
     }
+    if (!Leg_Force_Map_Forward(leg_l, F[0], Tp[0], &base_dm[0])
+        || !Leg_Force_Map_Forward(leg_r, F[1], Tp[1], &base_dm[2]))
+    {
+        return 0u;
+    }
+    /* 独立补偿叠加 */
+    if (!Gas_Spring_Apply(leg_l, leg_r, base_dm, raw_dm))
+    {
+        return 0u;
+    }
     lb->F[0] = F[0];
     lb->F[1] = F[1];
     lb->Tp[0] = Tp[0];
     lb->Tp[1] = Tp[1];
-
-    if (!Leg_Force_Map_Forward(leg_l, F[0], Tp[0], tau))
+    for (i = 0u; i < 4u; i++)
     {
-        return 0u;
+        torque->dm[i] = clampf(raw_dm[i], -lqr_debug.trq_max_hip,
+                              lqr_debug.trq_max_hip);
     }
-    torque->dm[DM_MOTOR_LEG_F_LFT] = clampf(tau[0], -lqr_debug.trq_max_hip,
-                                            lqr_debug.trq_max_hip);
-    torque->dm[DM_MOTOR_LEG_B_LFT] = clampf(tau[1], -lqr_debug.trq_max_hip,
-                                            lqr_debug.trq_max_hip);
-
-    if (!Leg_Force_Map_Forward(leg_r, F[1], Tp[1], tau))
-    {
-        return 0u;
-    }
-    torque->dm[DM_MOTOR_LEG_F_RGT] = clampf(tau[0], -lqr_debug.trq_max_hip,
-                                            lqr_debug.trq_max_hip);
-    torque->dm[DM_MOTOR_LEG_B_RGT] = clampf(tau[1], -lqr_debug.trq_max_hip,
-                                            lqr_debug.trq_max_hip);
 
     /* 轮扭矩 (输出极性在 dji.c 驱动边界统一处理) */
     torque->dji[DJI_MOTOR_WHEEL_LFT] = clampf(wheel[0], -lqr_debug.trq_max_wheel,
