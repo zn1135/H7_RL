@@ -60,6 +60,12 @@ typedef struct {
     uint8_t history_ready;               /* 历史有效 */
 } rl_observation_state_t;
 
+/* reference 为机器表校准后的实体 [左大腿 左膝 左轮 右大腿 右膝 右轮]。
+ * training 为 [lf0 lf1 lfwheel rf0 rf1 rfwheel]；转换互逆，支持原地调用。 */
+void RL_Observation_Roles_To_Training(const float reference[RL_ACTION_SIZE],
+                                      float training[RL_ACTION_SIZE]);
+void RL_Observation_Roles_From_Training(const float training[RL_ACTION_SIZE],
+                                        float reference[RL_ACTION_SIZE]);
 void RL_Observation_Init(rl_observation_state_t *state);
 void RL_Observation_Param_Init(rl_observation_param_t *param);
 void RL_Observation_Reset(rl_observation_state_t *state);

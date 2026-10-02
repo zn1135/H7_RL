@@ -19,7 +19,7 @@
 #define RL_TEST_CMD_HEIGHT_MAX   0.30f
 
 /* 推理路径: 投入后先零动作 N 步, 只跑 PD + 历史 (训练: 首次轮接地前零动作; 实机轮已接地, 只留短预热) */
-#define RL_WARMUP_STEPS     10u
+#define RL_WARMUP_STEPS     300u
 
 /* 动作裁剪 (训练 normalization.clip_actions = 100) */
 #define RL_ACTION_CLIP      100.0f

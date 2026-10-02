@@ -5,6 +5,40 @@
 
 #define RL_QUAT_EPS 1.0e-6f
 
+/* 左右交换，腿反号；同一变换也是逆变换 */
+static void RL_Observation_Transform_Roles(const float input[RL_ACTION_SIZE],
+                                           float output[RL_ACTION_SIZE])
+{
+    static const uint8_t source[RL_ACTION_SIZE] = {3u, 4u, 5u, 0u, 1u, 2u};
+    static const float sign[RL_ACTION_SIZE] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f};
+    float snapshot[RL_ACTION_SIZE];
+    uint32_t i;
+
+    if (input == NULL || output == NULL)
+    {
+        return;
+    }
+    memcpy(snapshot, input, sizeof(snapshot));
+    for (i = 0u; i < RL_ACTION_SIZE; i++)
+    {
+        output[i] = sign[i] * snapshot[source[i]];
+    }
+}
+
+/* 实体参考量 → 训练角色 */
+void RL_Observation_Roles_To_Training(const float reference[RL_ACTION_SIZE],
+                                      float training[RL_ACTION_SIZE])
+{
+    RL_Observation_Transform_Roles(reference, training);
+}
+
+/* 训练角色 → 实体参考量 */
+void RL_Observation_Roles_From_Training(const float training[RL_ACTION_SIZE],
+                                        float reference[RL_ACTION_SIZE])
+{
+    RL_Observation_Transform_Roles(training, reference);
+}
+
 /* 检查数组 */
 static uint8_t RL_Observation_Array_Finite(const float *data, uint32_t count)
 {

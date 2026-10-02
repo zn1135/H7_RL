@@ -18,7 +18,7 @@ static uint8_t lqr_running;     /* 已投入 */
 static uint8_t rl_engaged;      /* RL 已投入 */
 volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
-volatile leg_response_test_t leg_response_test = {1u, 0u, 0u, 0u};
+volatile leg_response_test_t leg_response_test = {0u, 0u, 0u, 0u};
 volatile rl_output_diag_t rl_output_diag;
 volatile uint8_t vofa_leg_response_side = 0u;
 

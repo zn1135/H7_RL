@@ -41,20 +41,26 @@ static uint8_t RL_Motors_Online(void)
     return 1u;
 }
 
-/* 固件关节 → 训练关节: q_t = sign × wrap(q − zero), 速度同符号; 映射未配置返回 0 */
+/* 机器表校准后交换角色: 训练 LF 对应实体右腿，RF 对应实体左腿 */
 uint8_t RL_Joint_Map(float joint_pos[4], float joint_vel[6])
 {
     const rl_map_t *map = &machine->rl;
+    float q[RL_ACTION_SIZE] = {0.0f};
     float qd[6];
 
     if (!map->configured)
     {
         return 0u;
     }
-    joint_pos[0] = (float)map->sign[0] * Angle_Wrap_180(leg_l.output.thigh_angle - map->zero[0]);
-    joint_pos[1] = (float)map->sign[1] * Angle_Wrap_180(leg_l.output.virtual_shank_angle - map->zero[1]);
-    joint_pos[2] = (float)map->sign[3] * Angle_Wrap_180(leg_r.output.thigh_angle - map->zero[2]);
-    joint_pos[3] = (float)map->sign[4] * Angle_Wrap_180(leg_r.output.virtual_shank_angle - map->zero[3]);
+    q[0] = (float)map->sign[0] * Angle_Wrap_180(leg_l.output.thigh_angle - map->zero[0]);
+    q[1] = (float)map->sign[1] * Angle_Wrap_180(leg_l.output.virtual_shank_angle - map->zero[1]);
+    q[3] = (float)map->sign[3] * Angle_Wrap_180(leg_r.output.thigh_angle - map->zero[2]);
+    q[4] = (float)map->sign[4] * Angle_Wrap_180(leg_r.output.virtual_shank_angle - map->zero[3]);
+    RL_Observation_Roles_To_Training(q, q);
+    joint_pos[0] = q[0];
+    joint_pos[1] = q[1];
+    joint_pos[2] = q[3];
+    joint_pos[3] = q[4];
     qd[0] = leg_l.input.d_hip_f;
     qd[1] = leg_l.output.d_virtual_shank_angle;
     qd[2] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
@@ -63,8 +69,9 @@ uint8_t RL_Joint_Map(float joint_pos[4], float joint_vel[6])
     qd[5] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
     for (uint8_t i = 0u; i < 6u; i++)
     {
-        joint_vel[i] = (float)map->sign[i] * qd[i];
+        qd[i] *= (float)map->sign[i];
     }
+    RL_Observation_Roles_To_Training(qd, joint_vel);
     return 1u;
 }
 
@@ -170,6 +177,7 @@ static void RL_Infer_Body(void)
     const rl_map_t *map = &machine->rl;
     float command[3];
     float action_t[RL_ACTION_SIZE] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};   /* 训练空间 */
+    float action_ref[RL_ACTION_SIZE] = {0.0f};  /* 实体参考 */
     float action[RL_ACTION_SIZE] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};     /* 固件空间 */
     imu_state_t used_imu;
     uint64_t obs_time_us;
@@ -219,9 +227,10 @@ static void RL_Infer_Body(void)
     }
 
     RL_Observation_Set_Last_Action(&rl_control.observation, action_t);
+    RL_Observation_Roles_From_Training(action_t, action_ref);
     for (uint8_t i = 0u; i < RL_ACTION_SIZE; i++)
     {
-        action[i] = (float)map->sign[i] * action_t[i];   /* 训练 → 固件 */
+        action[i] = (float)map->sign[i] * action_ref[i];   /* 参考 → 固件 */
     }
     RL_Action_Publish(action, 1u);
     Vofa_Trace_Record(&used_imu, &rl_control.observation, action_t,
