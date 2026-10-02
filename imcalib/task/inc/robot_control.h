@@ -17,6 +17,18 @@
 
 #define CTRL_DT MACHINE_CTRL_DT
 
+#ifndef CONTROL_TIME_VOFA_ENABLE
+#define CONTROL_TIME_VOFA_ENABLE 0u
+#endif
+
+typedef struct {
+    uint32_t sequence;
+    uint32_t period_us;
+    uint32_t min_period_us;
+    uint32_t max_period_us;
+    uint32_t run_us;
+} control_time_debug_t;
+
 /* 控制策略 */
 typedef enum {
     CTRL_STRATEGY_RL = 0,       /* RL 推理 */
@@ -113,6 +125,7 @@ extern volatile ctrl_strategy_t ctrl_strategy;
 extern volatile uint32_t ctrl_fault;
 extern volatile uint8_t output_debug_dm_sent;
 extern volatile uint8_t output_debug_dji_sent;
+extern volatile control_time_debug_t control_time_debug;
 extern volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 extern volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
 extern uint8_t torque_output_enabled;

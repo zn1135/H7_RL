@@ -191,6 +191,17 @@ void output_task_body(void)
     torque_output_t torque;
     torque_output_t sent_torque;
     uint8_t i;
+#if CONTROL_TIME_VOFA_ENABLE
+    static uint32_t previous_start_us;
+    uint32_t start_us;
+    uint32_t period_us;
+    uint32_t run_us;
+
+    start_us = (uint32_t)(Mono_Ns_Get() / 1000u);
+    period_us = control_time_debug.sequence != 0u
+        ? start_us - previous_start_us : 0u;
+    previous_start_us = start_us;
+#endif
 
     wheel_vel[0] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
     wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
@@ -263,4 +274,22 @@ void output_task_body(void)
             JointUsb_ActuationTick(&sent_torque, queue_ns, output_debug_dm_sent);
         }
     }
+#if CONTROL_TIME_VOFA_ENABLE
+    run_us = (uint32_t)(Mono_Ns_Get() / 1000u) - start_us;
+    if (control_time_debug.sequence != 0u)
+    {
+        if (control_time_debug.min_period_us == 0u
+            || period_us < control_time_debug.min_period_us)
+        {
+            control_time_debug.min_period_us = period_us;
+        }
+        if (period_us > control_time_debug.max_period_us)
+        {
+            control_time_debug.max_period_us = period_us;
+        }
+    }
+    control_time_debug.period_us = period_us;
+    control_time_debug.run_us = run_us;
+    control_time_debug.sequence++;
+#endif
 }

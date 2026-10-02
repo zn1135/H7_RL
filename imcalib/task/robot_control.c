@@ -20,6 +20,7 @@ volatile ctrl_strategy_t ctrl_strategy;
 volatile uint32_t ctrl_fault;
 volatile uint8_t output_debug_dm_sent;
 volatile uint8_t output_debug_dji_sent;
+volatile control_time_debug_t control_time_debug;
 uint8_t torque_output_enabled;
 
 osSemaphoreDef(ctrl_tick_sem);

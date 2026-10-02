@@ -196,13 +196,16 @@ static void Robot_Enable_Update(void)
     }
 }
 
-/* 普通 VOFA: 状态3 + 观测25 + 大腿角2 + 腿长2 */
+/* 普通 VOFA；周期测试覆盖 I26～I31 */
 static void Robot_Control_Send_Vofa(void)
 {
     static float dbg[32];
     uint8_t online_mask;
     uint16_t state_bits;
     uint32_t rl_bits;
+#if CONTROL_TIME_VOFA_ENABLE
+    control_time_debug_t time_sample;
+#endif
 
     memset(dbg, 0, sizeof(dbg));
     /* ch0 在线掩码 */
@@ -252,6 +255,18 @@ static void Robot_Control_Send_Vofa(void)
     dbg[29] = leg_r.output.thigh_angle;
     dbg[30] = leg_l.output.virtual_leg_length;
     dbg[31] = leg_r.output.virtual_leg_length;
+
+#if CONTROL_TIME_VOFA_ENABLE
+    taskENTER_CRITICAL();
+    time_sample = control_time_debug;
+    taskEXIT_CRITICAL();
+    dbg[26] = -2027.0f;
+    dbg[27] = (float)(time_sample.sequence & 0x00FFFFFFu);
+    dbg[28] = (float)time_sample.period_us;
+    dbg[29] = (float)time_sample.min_period_us;
+    dbg[30] = (float)time_sample.max_period_us;
+    dbg[31] = (float)rl_control.policy.run_us;
+#endif
 
     (void)Vofa_Send(dbg, 32u);
 }

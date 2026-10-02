@@ -103,8 +103,9 @@ void RL_Torque_Param_Init(rl_torque_param_t *param, rl_model_t model)
     const rl_map_t *map = &machine->rl;
     const float dof_train[6] = {RL_OBS_DOF_POS_L_THIGH, RL_OBS_DOF_POS_L_SHANK, 0.0f,
                                 RL_OBS_DOF_POS_R_THIGH, RL_OBS_DOF_POS_R_SHANK, 0.0f};
-    const float p_gains[6] = {10.0f, 10.0f, 0.0f, 10.0f, 10.0f, 0.0f};   /* 训练 Kp */
-    const float d_gains[6] = {1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f};       /* 训练 Kd */
+    float kp = 15.0f,kd = 1.0f;
+    const float p_gains[6] = {kp,kp, 0.0f, kp,kp, 0.0f};   /* 训练 Kp */
+    const float d_gains[6] = {kd, kd, 0.0f, kd, kd, 0.0f};       /* 训练 Kd */
 
     (void)model;
     if (param == NULL)
