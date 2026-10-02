@@ -140,13 +140,6 @@ static void RL_Command_From_Rc(float command[3])
     float height_min = RL_CMD_HEIGHT_MIN;
     float height_max = RL_CMD_HEIGHT_MAX;
 
-    if (leg_response_test.active)
-    {
-        vx_max = RL_TEST_CMD_VX_MAX;
-        yaw_max = RL_TEST_CMD_YAW_MAX;
-        height_min = RL_TEST_CMD_HEIGHT_MIN;
-        height_max = RL_TEST_CMD_HEIGHT_MAX;
-    }
     command[0] = rc_command.vel * vx_max;
     command[1] = -rc_command.yaw * yaw_max;
     command[2] = height_min

@@ -115,7 +115,6 @@ SECTIONS
   {
     . = ALIGN(32);
     _sbss_axi = .;
-    *(.s2r_dma)
     *Vofa_send.o(.bss .bss.* COMMON)
     *uart_idle.o(.bss .bss.* COMMON)
     . = ALIGN(32);

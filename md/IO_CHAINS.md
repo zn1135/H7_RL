@@ -496,7 +496,7 @@ task_comm.c:
 | force_det / force_valid | 行列式 / 有效位 | 解算内部，force_valid 供 Force_Map_Forward 门控 |
 | point_jac[2][2] | P 点雅可比 | **无人消费**（计算后死输出） |
 
-**VOFA 观测：**普通帧为 10 路 JustFloat 单侧腿响应，策略追踪为 32 路；当前普通布局和单侧测试流程见 [leg-response-vofa.md](leg-response-vofa.md)，打包源为 `task_comm.c::Robot_Control_Send_Vofa()`。
+**VOFA 观测：**普通帧是 32 路 JustFloat，含状态、完整 25 维观测、实体大腿角和腿长；策略追踪为独立 32 路布局。字段见 [vofa_policy_trace.md](vofa_policy_trace.md)，打包源为 `task_comm.c::Robot_Control_Send_Vofa()`。
 
 ---
 
@@ -641,23 +641,3 @@ motor_state.dji.vel_rad_s          rc_command (commTask 已解算)
 **符号责任**：反馈极性按 `dm_sign/dji_sign` 的 `.fb` 在驱动解码时统一到机体坐标；输出极性按 `.out` 在驱动下发时统一处理（`dm.c` / `dji.c`），调用方不要取反。详见 [LQR_PLAN.md](LQR_PLAN.md)。
 
 ---
-
-## 2026-09-27：整机诊断遥测 (S2R1, gap 测试)
-
-`imcalib/Telemetry/` 是**自包含模块**：只读既有全局量，不改任何现有结构体；任务层只有一个挂点。协议布局见 [sim2real_serial_protocol.md](sim2real_serial_protocol.md)，接线/采集/验收见 [sim2real_serial_capture.md](sim2real_serial_capture.md)。
-
-```
-imuTask    → imu_state / hi229_data          ─┐
-policyTask → rl_control.observation/policy    │  只读
-             action_state / input_command     ├─► s2r_source.c  (采样 + 变化检测)
-actuationTask → rl_control.torque_state       │        │
-                rl_output_dm/wheel_cmd_nm     ─┘        ▼
-commTask → S2R_Pump() ─► s2r_telemetry.c (成帧/CRC/队列) ─► USB CDC DMA / UART DMA
-             └ 返回 0 时走 VOFA，普通布局与策略追踪由 vofa_trace_requested 选择
-```
-
-- **采样层 `s2r_source.c`**：`policy.run_ok+run_fail` 变化 → 一次推理；`hi229_data.ts`/`last_rx_tick` 变化 → IMU 新帧；`dm/dji_motor_feedback[].last_rx_tick` 变化 → 电机新帧。序号（`state/imu/policy/control`）与时间戳全部由模块自维护。
-- **成帧层 `s2r_telemetry.c`**：POLICY 每次推理、CONTROL 100 Hz（10 ms 抽样）、IMU 最快 50 Hz、HISTORY 2 Hz、HEALTH 10 Hz、META 分片限速 300 ms；队列 24 槽，控制侧不等串口。
-- **链路口径**（本分支未插桩处一律写 NaN/0，不伪造）：`action_raw`、`tau_virtual_raw_fw`、`gas_tau_shank_fw`、`tau_motor_unclipped`、`current_motor` = NaN；`motor_send_ok_mask`/`can_enqueue_us` = 0；`*_rx_us` 是 commTask 首次见到新帧的时刻（1 ms 量化）；`motor_clamp_or_mask` 由请求饱和推导。META 的 `unavailable` / `derived` 两栏即这份清单。
-- **当前默认**：`S2R_DIAGNOSTIC_DEFAULT=0`、`vofa_trace_requested=0`，UART8 发送固定通道普通 VOFA JustFloat，USB CDC 留给关节 `JID1`；VOFA+ 可从 UART8 转接器保存 CSV，见 [vofa_policy_trace.md](vofa_policy_trace.md)。失能且发送完成时写 `vofa_trace_requested=1` 可切到多帧型策略追踪；写 `s2r_diagnostic_requested=1` 可在失能、无会话、发送完成后切到 S2R1 二进制流。`vofa_transport.requested=0` 可在失能、S2R 退出且关节 USB 未占用时切到 USB CDC 遥测，写 1 返回 UART8；详见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。`s2r_init_error` bit0 = 启动 RNG/boot_id 失败，bit1 = META 缓冲溢出。
-- **构建**：两份工程都已登记 `imcalib/Telemetry`；`.s2r_dma` 在 AXI SRAM，USB 可写对象由链接配置放入 `0x2404C000` 起的 16 KiB 非缓存区。改源码后先 `python tools/s2r_build_info.py` 再编译，并核对 map，见 [USB CDC 遥测发送](usb-cdc-telemetry.md)。

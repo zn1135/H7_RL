@@ -5,8 +5,7 @@
 #include "usbd_cdc_if.h"
 #include "Vofa_send.h"
 #include "dma_cache.h"
-#include "s2r_build_info.h"
-#include "s2r_telemetry.h"
+#include "firmware_build_info.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -313,7 +312,7 @@ static void status(uint32_t seq)
     put_u16(payload + 8u, RL_OBS_HISTORY_SIZE);
     put_u16(payload + 10u, RL_ACTION_SIZE);
     put_u32(payload + 12u, ctrl_fault);
-    memcpy(payload + 16u, S2R_SOURCE_SHA256, 64u);
+    memcpy(payload + 16u, FIRMWARE_SOURCE_SHA256, 64u);
     reply(HPI_STATUS, seq, payload, sizeof(payload));
 }
 
@@ -462,11 +461,6 @@ static void command(uint8_t type, uint32_t seq, const uint8_t *payload,
         last_action_seq = input_seq;
         last_action_ns = rx_ns;
         taskEXIT_CRITICAL();
-        S2R_Session_Update(1u);
-        S2R_Observation(1u, 1u, report_snapshot.sample_us);
-        S2R_Policy_Begin(report_snapshot.obs, report_snapshot.history,
-                         report_snapshot.command);
-        S2R_Policy_End(1u, training, NULL);
         ack(seq, HPI_OK);
         return;
     }

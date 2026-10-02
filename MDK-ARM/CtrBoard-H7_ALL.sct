@@ -19,7 +19,6 @@ LR_IROM1 0x08000000 0x00100000  {    ; load region size_region
    .ANY (+RW +ZI)
   }
   RW_IRAM2 0x24000000 0x0004C000  {  ; AXI SRAM: DMA 可见
-   * (.s2r_dma)                      ; S2R1 遥测发送缓冲
    vofa_send.o (+RW +ZI)             ; VOFA 发送缓冲 (UART TX DMA 读)
    uart_idle.o (+RW +ZI)             ; 串口 RX DMA 缓冲 (dbus/debug/hi229)
    .ANY (+RW +ZI)

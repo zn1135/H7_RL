@@ -139,11 +139,8 @@ CtrBoard-H7_ALL/
 │   │   ├── task_imu.c             ← HI229 与姿态更新
 │   │   ├── task_policy.c          ← 观测构建与策略推理
 │   │   ├── task_actuation.c       ← 策略仲裁 + 力矩计算与电机下发
-│   │   └── task_comm.c            ← 通信、状态、遥控、故障与 VOFA (+ S2R_Pump 挂点)
-│   ├── Telemetry/             ← 整机诊断遥测 S2R1 (gap 测试, 自包含, 只读现有状态)
-│   │   ├── s2r_wire.c/h           ← 记录/队列/小端编码/CRC32
-│   │   ├── s2r_source.c/h         ← 采样适配层 (变化检测, 自维护序号)
-│   │   └── s2r_telemetry.c/h      ← 七类帧成帧、会话/事件、META、UART DMA 泵
+│   │   └── task_comm.c            ← 通信、状态、遥控、故障与 VOFA
+│   ├── Telemetry/             ← VOFA 策略追踪与关节 USB 协议
 │   ├── user-lib/
 │       ├── uart_idle.c/h          ← UART IDLE+DMA 底层框架
 │       ├── dr16.c/h               ← DR16 遥控器
@@ -172,8 +169,6 @@ CtrBoard-H7_ALL/
     ├── DBUS.md              ← 遥控器解析说明
     ├── UART_IDLE_DMA.md     ← 串口接收框架说明
     ├── usb-cdc-telemetry.md ← MC02H7 板载 USB CDC 遥测与回退
-    ├── sim2real_serial_protocol.md ← S2R1 诊断遥测协议 (帧布局/字段语义)
-    ├── sim2real_serial_capture.md  ← 接线 + 采集 + 验收清单
     ├── sysid-change-map.md  ← 每处改动的输入/输出/调用链
     ├── joint-usb-sysid.md   ← 当前 USB 关节映射与辨识流程
     └── sysid/               ← 大机器测试历史文档（固件测试模块已移除）
@@ -184,7 +179,7 @@ CtrBoard-H7_ALL/
 ```
 
 `tools/sysid_export.py` ← 上位机导出 (VOFA 文件 → 契约 CSV + manifest + 校验和)
-`tools/s2r_capture.py` ← S2R1 被动接收/离线解码（不发送任何指令）；`tools/s2r_build_info.py` ← 生成/校验 `imcalib/Telemetry/s2r_build_info.h` 指纹（**编译前必须重生成**）；`tests/` ← 协议一致性与替身测试（`CC=gcc python tests/test_s2r.py`）
+`tools/firmware_build_info.py` ← 生成/校验 `imcalib/Telemetry/firmware_build_info.h` 源码指纹，供关节 USB 与宿主策略 USB 的固件身份使用；编译前运行并用 `--check` 核对。
 `tools/matlab/` ← LQR 增益表 MATLAB 管线：`run_all.m`（选机器 + Q/R，日常只改这个）、`machine_table.m`（机械参数）、`build_gain_table.m`（网格 dlqr / 拟合 / 闭环检查 / 写 C）、`model_AB.m`（动力学模型），计划与进度见 `tools/matlab/LQR_MATLAB_PLAN.md`
 
 ---
@@ -215,7 +210,6 @@ CtrBoard-H7_ALL/
 | 策略仲裁 | task_actuation.c | ✅ 编译通过（左拨杆 中=LQR / 上=RL / 下=失能；右拨杆中位=投入，其他=零力矩）；🟡 待台架 |
 | 简单函数库 | user-lib/simple-function.c/h | ✅ 一阶低通 + 斜坡函数，编译通过 |
 | 速度卡尔曼 | user-lib/kalman.c/h | ✅ 照抄 Leg2_v1，编译通过；🟡 加速度符号待台架 |
-| 整机诊断遥测 | Telemetry/s2r_wire + s2r_source + s2r_telemetry | ✅ UART 版移植完成（去耦采样 + 单挂点 `S2R_Pump()`，Keil 全量编译链接 0 error；协议测试 8/8）；✅ 板载 USB CDC 的普通 VOFA 在 FIFO 中断模式实机连续 20 秒接收 1003 帧；🟡 S2R1 走 USB 仍待单独验收（见 `md/usb-cdc-telemetry.md`） |
 
 ---
 
@@ -230,8 +224,7 @@ CtrBoard-H7_ALL/
 - **HI229 姿态**：直接使用模块输出的四元数 + 欧拉角，Attitude_Algorithm 只做归一化和单位转换；取轴与符号来自机器表 `machine->imu`（`task_imu.c` 应用），驱动 `hi229.c/h` 只出原始值
 - **标定**：500ms (200ms 暖机 + 300ms 采样)（历史记录：当前代码中已找不到对应标定/暖机流程，`imcalib`/`Core` 无相关实现；疑属已移除的 sysid/标定模块。作者 2026-09-25 确认：按现状保留为历史说明）
 - **串口接收**：IDLE+DMA Circular，不使用 Resync，任务层校验
-- **VOFA 调试**：当前测试固件上电经 UART8 发送普通 32 通道 JustFloat，ch3～14 为 IMU 与投影重力，VOFA+ 可直接接收并保存 CSV；字段见 [vofa_policy_trace.md](vofa_policy_trace.md)。失能且发送完成时写 `vofa_trace_requested=1` 可切到多帧型策略追踪。`S2R_DIAGNOSTIC_DEFAULT=0`，S2R1 二进制流需显式切换并用 `tools/s2r_capture.py` 接收；USB CDC 当前留给关节 `JID1`，两种用途互斥，见 [usb-cdc-telemetry.md](usb-cdc-telemetry.md)。
-- **诊断遥测 (gap 测试)**：`imcalib/Telemetry/` 自包含模块（`s2r_wire` 编码/队列 + `s2r_source` 只读采样 + `s2r_telemetry` 成帧/发送泵），**只读**现有状态、不改任何现有结构体；任务层唯一挂点是 `task_comm.c::comm_task_body()` 末尾的 `S2R_Pump()`。与 32 路 VOFA 同口互斥（`S2R_DIAGNOSTIC_DEFAULT`、`s2r_diagnostic_requested`，变更 104）。**`S2R_RATE_LOW` 限流档**：0 = 原设定（待机 ≈58 kB/s）、1 = 低速 ≈9.5 kB/s、2 = 稳健 ≈4.3 kB/s（**USB CDC 首轮默认**）、3 = 极低 ≈1.6 kB/s；USB CDC 实测后再决定是否切到档 1/0。**短窗录制**：**默认全自动**（`S2R_RECORD_AUTO=1`）—— 投入建会话即按 md 的 100 Hz 把 CONTROL 完整快照存进 192 KB 片内缓存（≈4.1 s，满即停），失能后再录 200 ms 尾巴即停并自动慢速回放导出，**全程不需要调试器**；调试器写 `s2r_record_requested`/`s2r_replay_requested` 仍可手动覆盖（`s2r_record_state`/`s2r_record_frames` 只读），对应协议 §10 第一条建议 + §13.1。未插桩的字段按协议写 NaN/0，清单在 META 的 `unavailable`/`derived`。**改源码后必须先 `python tools/s2r_build_info.py` 再编译**（否则烧录代码与 META 身份不一致）
+- **VOFA 调试**：普通帧是 32 通道 JustFloat（状态3 + obs25 + 大腿角2 + 腿长2），默认 UART8；失能且发送完成时写 `vofa_trace_requested=1` 切到策略追踪。字段见 [vofa_policy_trace.md](vofa_policy_trace.md)。USB CDC 留给关节 JID1，同一 USB 口与 VOFA 互斥。
 - **DJI 力矩常数**：`per_raw` 按型号满电流堵转力矩 / 满 raw × (`machine->dji_gear_ratio` / 标准减速比) 缩放，见 `dji.c` 的 `Dji_Torque_To_Current()`；**Kt 绝对值仍待台架实测**
 - **机器切换**：改 `imcalib/user-lib/machine_config.h` 的 `MACHINE_DEFAULT`（两份表在 `machine_config.c`，含刻度、满量程、限幅、**极性**，以及 **IMU 取轴与符号 `.imu`**、**RL 关节映射 `.rl`**）；DM 的 PMAX/VMAX/TMAX 以电机实际配置为准，用达妙上位机读一次与配置表比对
 - **CMSIS-DSP**：CubeMX 的 X-CUBE-ALGOBUILD 只生成头文件 `Middlewares/ST/ARM/DSP/Inc/arm_math.h`（1.7.0），**不挂库、不加源**。本工程用源码方式：`imcalib/user-lib/arm_sin_f32.c` / `arm_cos_f32.c`（照抄 `Drivers/CMSIS/DSP/Source` 1.6.0）+ `arm_sin_table_f32.c`（只截 513 点 `sinTable_f32`），头文件走相对路径 `#include "../../Drivers/CMSIS/DSP/Include/arm_math.h"`；两套工程都不需要改包含目录，eIDE 靠 `srcDirs` 自动扫到，Keil 已登记进 `imcalib/user-lib` 组。**不要把 `arm_common_tables.c` 整个当源文件编**（armcc 不拆数据段，700 KB 表整段进 flash），**也不要挂 `Drivers/CMSIS/DSP/Lib/ARM` 下的 .lib**：目录里 19 个库只有 `arm_cortexM7lfdp_math.lib` 对应本机，多挂时 armlink 不报错、静默取第一个（软浮点）；eIDE 开着时手改 `eide.yml` 几秒内被覆盖。再要用别的 DSP 函数，照同样办法把对应源文件抄进 user-lib

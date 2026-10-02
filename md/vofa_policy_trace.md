@@ -1,14 +1,23 @@
 # VOFA 采集与模式切换
 
-当前测试固件上电通过 UART8 发送普通 10 通道 JustFloat 单侧腿响应帧；USB CDC 留给 `JID1` 双向通信。`vofa_transport.requested/active` 中 1 为默认 UART8，0 为 USB CDC 遥测。普通帧为 10 个小端 float32 和 `00 00 80 7F` 帧尾，共 44 字节；布局、切侧和解码见 [leg-response-vofa.md](leg-response-vofa.md)。S2R1 二进制流上电不占口。
+默认通过 UART8 发送普通 32 通道 JustFloat；USB CDC 留给 JID1。`vofa_transport.requested/active` 的 1 为 UART8、0 为 USB CDC。普通帧是 32 个小端 float32 与 `00 00 80 7F` 帧尾，共 132 字节。
 
 ## 普通 VOFA（上电默认）
 
-`task_comm.c::Robot_Control_Send_Vofa()` 约 500 Hz 发送。VOFA+ 必须选择 JustFloat、10 通道。当前普通布局只记录 `vofa_leg_response_side` 失能锁存侧的前/后髋位置、最新下发命令反解的虚拟关节力矩、RL 零点相对位置和虚拟腿长；不再输出 IMU 或策略观测。本测试固件上电默认 `leg_response_test.requested=1`、左腿单测，先失能锁存后再投入；恢复双侧输出须失能时写 requested=0。完整字段、有效位与操作步骤以 [leg-response-vofa.md](leg-response-vofa.md) 为准。
+`task_comm.c::Robot_Control_Send_Vofa()` 从通信任务非阻塞发送，实际接收频率受任务执行和传输忙状态影响，不能由 CSV 行数直接认定控制频率。VOFA+ 选择 JustFloat、32 通道；UART8 使用 1152000、8N1。
 
-普通 VOFA 不含策略帧类型、序号或 CRC；虽然 ch0 有 MCU 毫秒时间，仍不能交给下文的策略追踪解码脚本。使用 `tools/leg_response_vofa_decode.py` 保存和展开单侧记录。
+| 通道 | 内容 |
+| --- | --- |
+| ch0 | IMU、遥控、四髋与两轮在线掩码 |
+| ch1 | 电机使能、跌倒、两腿解算、四髋使能及控制器投入状态 |
+| ch2 | 模型、观测、历史、动作、失败计数及发送状态 |
+| ch3～27 | `rl_control.observation.obs[0～24]` |
+| ch28～29 | 实体左、右大腿角 rad |
+| ch30～31 | 实体左、右虚拟腿长 m |
 
-电机失能且上一帧发送完成时，将 `vofa_trace_requested` 写 1 可切到下文的策略追踪；写 0 返回普通 VOFA。两种布局应分别保存采集文件。将 `s2r_diagnostic_requested` 写 1 可切到 S2R1 二进制流；它与 VOFA 互斥，VOFA+ 不能解析 S2R1。
+普通帧没有帧型、时间戳、序号或 CRC；直接保存 CSV 分析，不交给策略追踪解码器。关节观测的训练角色顺序与实体左右不同，按 `rl_observation.h` 和 `task_policy.c` 解读。
+
+电机失能且发送空闲时写 `vofa_trace_requested=1` 切到策略追踪，写 0 返回普通帧。两种布局分别保存文件。USB 传输切换还要求 JID1 未占用且未请求采样流。
 
 ## 策略追踪 VOFA（按需切换）
 
@@ -66,4 +75,4 @@ python tools/vofa_trace_decode.py vofa_capture.bin vofa_decoded_01
 
 比较起立故障时，先看 `obs_*` 的投影重力、角速度、关节位置与速度是否和视频姿态一致，再看 `hist_*` 是否已同步、`rl_ready`／`policy_ready` 与推理耗时是否表明策略真正接管。`action_*` 是策略输出，`dm_cmd_*`／`wheel_cmd_*` 是最近一次执行任务下发的力矩；结合各自 MCU 时间戳判断先后，不直接按同一行计算控制增益。若 `summary.json` 有丢样或历史失同步，先排除串口链路问题，再比较训练与实机数值。
 
-当前上电默认使用普通 VOFA；若要生成本节的策略追踪 CSV，先在失能且发送空闲时将 `vofa_trace_requested` 写 1。VOFA+ 保存原始 CSV 后，再用本节的解码脚本按 ch0 帧型还原观测、IMU、动作与历史。
+当前上电默认使用普通 VOFA；只有在失能且发送空闲时将 `vofa_trace_requested` 写 1，才会生成以下策略追踪帧。普通 CSV 与策略追踪 CSV 不混用。

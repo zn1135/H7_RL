@@ -74,7 +74,7 @@ IMU(四元数+陀螺仪) + 电机编码器(关节角) + DJI轮速 + 遥控指令
 | `actuationTask` | 小机 1kHz / 大机 500Hz | TIM6 信号量（硬实时） | 策略仲裁（LQR / RL）→ 力矩计算 → CAN 下发 |
 | `policyTask` | 100Hz | TIM6 节拍 `MACHINE_POLICY_DIV` 分频信号量（变更 103） | 观测构建 → CubeAI 推理 → 写 action_state |
 | `imuTask` | 1kHz | osDelay(1ms) | HI229 新帧解析 → 姿态更新 → 写 imu_state |
-| `commTask` | 1kHz | osDelay | DM/DJI/DR16 解析 → 状态更新 → 在线检测 → 故障位 → VOFA（或 S2R1 诊断遥测 `S2R_Pump()`，二者同口互斥） |
+| `commTask` | 1kHz | osDelay | DM/DJI/DR16 解析 → 状态更新 → 在线检测 → 故障位 → VOFA（普通帧与策略追踪同口互斥） |
 | `defaultTask` | - | - | USB 初始化（保留） |
 
 **单写者模型**：每个共享状态只有一个任务写，32bit 对齐 float 在 M7 上读写原子，无需锁。
@@ -115,7 +115,7 @@ actuationTask → torque_output_t → DM/DJI 力矩 → CAN
 
 **输出**：`leg_output_t` 含 thigh_angle/l0/phi0/virtual_shank/各雅可比/force_map/valid
 
-普通 VOFA 当前为 10 通道单侧腿响应布局，字段与台架步骤见 [leg-response-vofa.md](leg-response-vofa.md)。策略追踪仍为 32 通道独立布局；普通采集与单侧输出过滤分别设置。
+普通 VOFA 当前为 32 通道状态、观测与腿部反馈布局；策略追踪也是 32 通道，但帧结构不同。字段与切换方法见 [vofa_policy_trace.md](vofa_policy_trace.md)。
 
 DM 反馈层已对右侧电机取反（`feedback_sign`），力矩下发按 `output_sign` 在 `dm.c` 边界取反，使逻辑侧正力矩与左右实体电机的正运动方向一致。
 
@@ -205,7 +205,7 @@ PID 参数按模型存表，具体数值以 `RL_Torque_Param_Init()` 为准。�
 | 步骤 | 内容 |
 |------|------|
 | 投入判定 | 读 `output_task_rl_engaged()`：左拨杆上 + 右拨杆中 + 电机使能 + 遥控在线（拨杆语义仍只在 `task_actuation.c`）。未投入：清历史、发零动作、`rl_ready=0`；观测仍照算一份预览供 VOFA（不进历史，变更 99） |
-| 指令 | 右摇杆 Y → vx、右摇杆 X → yaw_rate、拨轮 → height，输入符号沿用原映射。单腿测试 active=1 时使用 `RL_TEST_CMD_*`，按作者指定开放 ±5 m/s、±5 rad/s、0.15～0.30 m，进入完整 25 维观测及 125 维历史后由网络推理。active=0 时仍使用 `RL_CMD_*` 的原固定 0 / 0 / 0.20。现有起立网络训练域固定，开放输入不代表已验证跟踪；左摇杆摆角无独立输入槽。详见 [单腿测试](leg-response-vofa.md)。 |
+| 指令 | 右摇杆 Y/X 和拨轮经 `RL_Command_From_Rc()` 映射，范围统一来自 `RL_CMD_*`；当前起立模型固定速度 0、偏航角速度 0、高度 0.20 m。无单侧测试专用范围。 |
 | 观测 | `RL_Control_Update_Observation()`：源无效或 `.rl` 未配置 → 从头预热、零动作 |
 | 预热 | 投入后前 `RL_WARMUP_STEPS`（10 步 = 0.1 s）发零动作（此间 `rl_ready=1` 但动作为零），PD 与历史照跑。训练是"首次任一轮接触力 > 1 N 后的下一策略步才推理"，实机轮本来就在地上，只留短预热 |
 | 推理 | `RL_Policy_Run()` → 训练动作 → 裁剪 `RL_ACTION_CLIP` = 100（训练 clip_actions）→ 存 last_action（训练 obs 里也是 clip 后的动作）→ 乘 `.rl.sign` 变固件动作 → 发布，`rl_ready=1` |
@@ -388,7 +388,7 @@ Leg_Solve 当前已完成以下验证：
 | 观测 | 25 维同 §3.2；`dof_vel` 训练用 500 Hz 位置差分，固件用电机反馈速度（噪声与延迟特性不同，待观察） | 已填 |
 | PD | Kp 10 / Kd 1.0（腿），轮 Kd 0.1；`τ = Kp(目标 − q) + Kd(目标速度 − q̇)`；虚拟关节力矩上限 40 / 40 / 3.9 | 已填（变更 97） |
 | 动作 | 腿 ×0.5 + 默认角，轮 ×10；clip_actions 100；obs 里的 last_action 是 clip 后的动作 | 已填 |
-| 指令 | 起立训练域 vx [0,0]、yaw [0,0]、高度 0.20 m（课程解锁后；解锁前 0.30）；sim2sim 回放用 `--cmd_vx 0 --cmd_height 0.20` | 已填 0 / 0 / 0.20；**checkpoint 是否解锁需训练侧确认** |
+| 指令 | 右摇杆 Y/X 和拨轮经 `RL_Command_From_Rc()` 映射，范围统一来自 `RL_CMD_*`；当前起立模型固定速度 0、偏航角速度 0、高度 0.20 m。无单侧测试专用范围。 |
 | 起立接管 | 初态 0.15 m 地面后摆，lf0 = ±11 rad（Isaac 不 wrap；sim2sim 回放 wrap 到 ±π 即 −1.566）；首次任一轮接触力 > 1 N 后的下一策略步才推理，之前零动作 + PD | 预热 10 步；固件角度 wrap ±π 与 sim2sim 一致；起立本身以训练侧 sim2sim 结果为准，先测站立 |
 | 坐标 | URDF 机体系，z 上；重力投影 = quat_rotate_inverse(q, [0,0,−1])；角速度机体系 | 与固件一致，前提是下面的 x 方向判定 |
 
@@ -417,6 +417,6 @@ Leg_Solve 当前已完成以下验证：
 
 ### 8.3 VOFA
 
-当前测试固件上电经 UART8 发送普通 10 通道 JustFloat 单侧腿响应布局，目标约 500 Hz；USB CDC 默认留给关节 `JID1`，失能且无 JID1 流时可切为 VOFA USB 遥测。字段、测试开关及单侧出力流程见 [leg-response-vofa.md](leg-response-vofa.md)。失能且发送完成时写 `vofa_trace_requested=1` 可切到 32 通道策略追踪；S2R1 二进制流为显式切换的另一种模式，详见 [vofa_policy_trace.md](vofa_policy_trace.md)。
+当前固件上电经 UART8 发送普通 32 通道 JustFloat；USB CDC 默认留给关节 JID1，失能且无 JID1 流时可切为 VOFA USB 遥测。失能且发送完成时写 `vofa_trace_requested=1` 切到策略追踪，见 [vofa_policy_trace.md](vofa_policy_trace.md)。
 
 历史（RL 调试帧，`task_comm.c` 内已注释留档）：RL 模式（推理路径且左拨杆上位）曾复用 LQR 无意义的通道，下标不动：ch3~5 投影重力、ch6 RL 状态位、ch7~9 观测角速度（策略机体系，已镜像、×0.25）、ch10~13 固件原始 thigh / vs、ch15~20 观测关节速度（×0.05）、ch21~24 观测关节角、ch25~30 力矩命令（总输出关也有值）、ch31 推理耗时。

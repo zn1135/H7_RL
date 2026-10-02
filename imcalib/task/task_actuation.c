@@ -18,53 +18,6 @@ static uint8_t lqr_running;     /* 已投入 */
 static uint8_t rl_engaged;      /* RL 已投入 */
 volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
-volatile leg_response_test_t leg_response_test = {0u, 0u, 0u, 0u};
-volatile rl_output_diag_t rl_output_diag;
-volatile uint8_t vofa_leg_response_side = 0u;
-
-/* 失能锁存测试配置 */
-static void output_leg_test_update(void)
-{
-    uint8_t requested;
-    uint8_t side;
-
-    requested = leg_response_test.requested;
-    side = vofa_leg_response_side;
-    if (!robot_state.motor_enabled)
-    {
-        leg_response_test.active = (uint8_t)(requested == 1u);
-        leg_response_test.side = side;
-        leg_response_test.inhibited = (uint8_t)(requested > 1u || side > 1u);
-    }
-    else if (requested != leg_response_test.active
-        || ((leg_response_test.active || requested)
-            && side != leg_response_test.side))
-    {
-        leg_response_test.inhibited = 1u;
-    }
-}
-
-/* 遥测跟随锁存侧 */
-uint8_t output_leg_test_side(void)
-{
-    return leg_response_test.side;
-}
-
-/* 记录本拍关节目标 */
-static void output_rl_diag_update(const torque_output_t *torque, uint64_t queue_ns)
-{
-    rl_output_diag.valid = 0u;
-    if (ctrl_strategy != CTRL_STRATEGY_RL || !torque->valid)
-    {
-        return;
-    }
-    rl_output_diag.joint_target[0] = rl_control.torque_state.pos_target[0];
-    rl_output_diag.joint_target[1] = rl_control.torque_state.pos_target[1];
-    rl_output_diag.joint_target[2] = rl_control.torque_state.pos_target[3];
-    rl_output_diag.joint_target[3] = rl_control.torque_state.pos_target[4];
-    rl_output_diag.updated_ns = queue_ns;
-    rl_output_diag.valid = 1u;
-}
 
 /* 输出初始化 */
 void output_task_init(void)
@@ -92,43 +45,9 @@ uint8_t output_task_rl_engaged(void)
 static void output_dispatch(const torque_output_t *torque)
 {
     torque_output_t applied;
-    const leg_map_t *map;
     uint8_t i;
 
     applied = *torque;
-    if (!JointUsb_ModeLock())
-    {
-        if (leg_response_test.inhibited
-            || (leg_response_test.active && ctrl_strategy != CTRL_STRATEGY_RL))
-        {
-            applied.valid = 0u;
-        }
-        else if (leg_response_test.active)
-        {
-            map = leg_response_test.side == 0u ? &leg_map_l : &leg_map_r;
-            if (leg_response_test.side > 1u || !map->configured
-                || map->dm_front < 0 || map->dm_front >= DM_MOTOR_NUM
-                || map->dm_rear < 0 || map->dm_rear >= DM_MOTOR_NUM
-                || map->dm_front == map->dm_rear)
-            {
-                applied.valid = 0u;
-            }
-            else
-            {
-                for (i = 0u; i < DM_MOTOR_NUM; i++)
-                {
-                    if (i != (uint8_t)map->dm_front && i != (uint8_t)map->dm_rear)
-                    {
-                        applied.dm[i] = 0.0f;
-                    }
-                }
-                for (i = 0u; i < DJI_MOTOR_NUM; i++)
-                {
-                    applied.dji[i] = 0.0f;
-                }
-            }
-        }
-    }
     if (!applied.valid || !torque_output_enabled)
     {
         for (i = 0u; i < DM_MOTOR_NUM; i++)
@@ -273,7 +192,6 @@ void output_task_body(void)
     torque_output_t sent_torque;
     uint8_t i;
 
-    output_leg_test_update();
     wheel_vel[0] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
     wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
 
@@ -329,7 +247,6 @@ void output_task_body(void)
         uint64_t queue_ns = Mono_Ns_Get();
 
         output_dispatch(&torque);
-        output_rl_diag_update(&torque, queue_ns);
         if (JointUsb_ModeLock() || JointUsb_StreamRequested())
         {
             /* 记录最终命令 */

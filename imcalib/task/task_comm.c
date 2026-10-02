@@ -10,7 +10,6 @@
 #include "ws2812.h"
 #include "mono_ns.h"
 #include "task.h"
-#include "../Telemetry/s2r_telemetry.h"
 #include "../Telemetry/vofa_trace.h"
 #include "../Telemetry/joint_usb.h"
 #include "usbd_cdc_if.h"
@@ -197,14 +196,7 @@ static void Robot_Enable_Update(void)
     }
 }
 
-/*
- * 普通 VOFA：单侧腿诊断，角度均为固件坐标。
- * ch0 时间ms，ch1 侧，ch2~4 观测指令vx/yaw/height；
- * ch5~8 大腿目标/实际、小腿目标/实际；ch9 腿长，ch10 摆角；
- * ch11~14 前/后髋下发力矩、前/后髋反馈力矩；ch15 有效位。
- * ch16~19 前/后髋位置、前/后髋速度；ch20~21 前/后髋雅可比；
- * ch22~23 前/后反馈年龄ms，无可信时间戳为-1。
- */
+/* 普通 VOFA: 状态3 + 观测25 + 大腿角2 + 腿长2 */
 static void Robot_Control_Send_Vofa(void)
 {
     static float dbg[32];
@@ -267,8 +259,6 @@ static void Robot_Control_Send_Vofa(void)
 /* 通信单周期 */
 void comm_task_body(void)
 {
-    uint8_t s2r_active;
-
     Dm_Parse();
     Dji_Parse();
     Motor_State_Update();
@@ -280,22 +270,14 @@ void comm_task_body(void)
     Robot_Fault_Update();
     Robot_Enable_Update();
     JointUsb_Pump();
-    /* 同口互斥：S2R > 策略 VOFA > 普通 VOFA；普通布局现为单侧腿响应。 */
-    s2r_active = S2R_Pump();
-    if (s2r_active)
+    /* 策略追踪与普通 VOFA 同口互斥 */
+    if (Vofa_Transport_Update((uint8_t)(!robot_state.motor_enabled
+        && !JointUsb_ModeLock() && !JointUsb_StreamRequested())))
     {
         Vofa_Trace_Discard();
     }
-    else
+    if (!Vofa_Trace_Pump())
     {
-        if (Vofa_Transport_Update((uint8_t)(!robot_state.motor_enabled
-            && !JointUsb_ModeLock() && !JointUsb_StreamRequested())))
-        {
-            Vofa_Trace_Discard();
-        }
-        if (!Vofa_Trace_Pump())
-        {
-            Robot_Control_Send_Vofa();
-        }
+        Robot_Control_Send_Vofa();
     }
 }

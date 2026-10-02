@@ -58,7 +58,6 @@ static leg_state_t leg_l, leg_r;
 static action_state_t action_state;
 static input_command_t input_command;
 static rc_command_t rc_command;
-static volatile leg_response_test_t leg_response_test;
 static struct {
     rl_observation_state_t observation;
     rl_observation_param_t param;
@@ -142,7 +141,6 @@ static void setup(void)
     memset(&leg_r, 0, sizeof(leg_r));
     memset(&action_state, 0, sizeof(action_state));
     memset(&input_command, 0, sizeof(input_command));
-    leg_response_test = (leg_response_test_t){0};
     RL_Observation_Param_Init(&rl_control.param);
     RL_Observation_Init(&rl_control.observation);
     imu_state.online = 1;
@@ -218,47 +216,26 @@ int main(int argc, char **argv)
     setup();
     if (strcmp(argv[1], "fixed_range") == 0)
     {
-        leg_response_test.requested = 1; /* Unlatched request must not change commands. */
         rc(-660, -660, -660, -660, 1); commands(0, 0, 0.20f);
         rc(0, 0, 0, 0, 1); commands(0, 0, 0.20f);
         rc(660, 660, 660, 660, 1); commands(0, 0, 0.20f);
-        leg_response_test.active = 1; commands(5, 5, 0.30f);
-        leg_response_test.active = 0; commands(0, 0, 0.20f);
-    }
-    else if (strcmp(argv[1], "test_range_and_polarity") == 0)
-    {
-        leg_response_test.active = 1;
-        commands(0, 0, 0.225f);
-        rc(660, 660, 660, 660, 1);
-        near(rc_command.yaw, -1); near(rc_command.vel, 1); near(rc_command.len, 1);
-        commands(5, 5, 0.30f);
-        rc(-660, -660, -660, -660, 1);
-        near(rc_command.yaw, 1); near(rc_command.vel, -1); near(rc_command.len, -1);
-        commands(-5, -5, 0.15f);
-        rc(330, -330, 0, 660, 1); commands(-2.5f, 2.5f, 0.225f);
-        rc(330, -330, 0, -660, 1); commands(-2.5f, 2.5f, 0.225f);
     }
     else if (strcmp(argv[1], "deadband_and_offline") == 0)
     {
-        leg_response_test.active = 1;
-        rc(20, 10, 20, 20, 1); commands(0, 0, 0.225f);
+        rc(20, 10, 20, 20, 1); commands(0, 0, 0.20f);
+        near(rc_command.vel, 0); near(rc_command.yaw, 0); near(rc_command.len, 0);
         rc(21, 11, 21, 21, 1);
         assert(rc_command.vel > 0 && rc_command.yaw < 0 && rc_command.len > 0);
-        rc(900, -900, 900, 0, 1); commands(-5, 5, 0.30f);
-        rc(660, 660, 660, 660, 0); commands(0, 0, 0.225f);
+        commands(0, 0, 0.20f);
+        rc(660, 660, 660, 660, 0); commands(0, 0, 0.20f);
         assert(!rc_command.online && !rc_command.s1 && !rc_command.s2);
     }
     else if (strcmp(argv[1], "observation_and_history") == 0)
     {
         float baseline[RL_OBS_SIZE], snapshots[6][RL_OBS_SIZE];
-        static const int16_t inputs[6][3] = {
-            {-660, -660, -660}, {660, 330, 660}, {330, -330, 0},
-            {-330, 660, -330}, {0, -660, 330}, {660, 0, -660}
-        };
-        leg_response_test.active = 1;
         build();
         memcpy(baseline, rl_control.observation.obs, sizeof(baseline));
-        near(baseline[6], 0); near(baseline[7], 0); near(baseline[8], 1.125f);
+        near(baseline[6], 0); near(baseline[7], 0); near(baseline[8], 1);
         for (frame = 0; frame < RL_OBS_HISTORY_FRAMES; frame++)
         {
             assert(!memcmp(&rl_control.observation.history[frame * RL_OBS_SIZE],
@@ -266,17 +243,16 @@ int main(int argc, char **argv)
         }
         for (frame = 0; frame < 6; frame++)
         {
-            rc(inputs[frame][0], inputs[frame][1], inputs[frame][2], 0, 1);
+            imu_state.gyro_rad_s[0] = 0.4f + (float)frame * 0.1f;
+            leg_r.output.thigh_angle = machine->rl.zero[2] + 0.4f + (float)frame * 0.02f;
             build();
             memcpy(snapshots[frame], rl_control.observation.obs, sizeof(baseline));
+            near(snapshots[frame][0], 0.1f + (float)frame * 0.025f);
+            near(snapshots[frame][9], -0.34f - (float)frame * 0.02f);
             for (i = 0; i < RL_OBS_SIZE; i++)
             {
-                if (i < 6 || i > 8) { near(snapshots[frame][i], baseline[i]); }
+                if (i != 0 && i != 9) { near(snapshots[frame][i], baseline[i]); }
             }
-            near(snapshots[frame][6], (float)inputs[frame][1] / 660.0f * 10.0f);
-            near(snapshots[frame][7], (float)inputs[frame][0] / 660.0f * 1.25f);
-            near(snapshots[frame][8],
-                 (0.15f + ((float)inputs[frame][2] / 660.0f + 1) * 0.075f) * 5);
         }
         for (frame = 0; frame < RL_OBS_HISTORY_FRAMES; frame++)
         {
@@ -287,16 +263,17 @@ int main(int argc, char **argv)
     }
     else if (strcmp(argv[1], "inference_publication") == 0)
     {
-        leg_response_test.active = 1;
+        const float expected_reference[6] = {0.5f, -0.625f, -0.75f, -0.125f, 0.25f, 0.375f};
         rc(660, 660, 660, 0, 1);
         ctrl_task_init();
         assert(network_init_calls == 1);
         warmup();
-        fixture_tick += 10;
-        ctrl_task_body();
+        fixture_tick += 10; ctrl_task_body();
         assert(network_calls == 1 && action_state.updated && action_state.rl_ready);
         assert(action_state.last_ok_tick == fixture_tick);
-        near(captured_obs[6], 10); near(captured_obs[7], 1.25f); near(captured_obs[8], 1.5f);
+        near(captured_obs[6], 0); near(captured_obs[7], 0); near(captured_obs[8], 1);
+        near(captured_obs[9], -0.34f); near(captured_obs[10], 0.40f);
+        near(captured_obs[11], 0.14f); near(captured_obs[12], -0.20f);
         for (frame = 0; frame < RL_OBS_HISTORY_FRAMES; frame++)
         {
             assert(!memcmp(&captured_history[frame * RL_OBS_SIZE], captured_obs,
@@ -305,7 +282,7 @@ int main(int argc, char **argv)
         for (i = 0; i < RL_ACTION_SIZE; i++)
         {
             near(captured_obs[19 + i], 0);
-            near(action_state.a[i], (float)machine->rl.sign[i] * network_action[i]);
+            near(action_state.a[i], (float)machine->rl.sign[i] * expected_reference[i]);
             near(rl_control.observation.last_action[i], network_action[i]);
         }
         ctrl_task_body();
@@ -318,38 +295,46 @@ int main(int argc, char **argv)
     }
     else if (strcmp(argv[1], "preview_no_inference") == 0)
     {
-        leg_response_test.active = 1;
-        rc(-660, 660, -660, 0, 1);
-        ctrl_task_body();
+        rc(-660, 660, -660, 0, 1); ctrl_task_body();
         assert(network_calls == 0 && trace_calls == 1 && warmup_cnt == 0);
         assert(!action_state.rl_ready && !rl_control.observation.history_ready);
         all_actions_zero();
-        near(rl_control.observation.obs[6], 10);
-        near(rl_control.observation.obs[7], -1.25f);
-        near(rl_control.observation.obs[8], 0.75f);
+        near(rl_control.observation.obs[6], 0);
+        near(rl_control.observation.obs[7], 0);
+        near(rl_control.observation.obs[8], 1);
     }
     else if (strcmp(argv[1], "invalid_source") == 0)
     {
-        leg_response_test.active = 1;
-        warmup();
-        motor_state.dm.online[3] = 0;
-        ctrl_task_body();
+        warmup(); motor_state.dm.online[3] = 0; ctrl_task_body();
         assert(network_calls == 0 && !action_state.rl_ready && !warmup_cnt);
         assert(!rl_control.observation.valid && !rl_control.observation.history_ready);
         all_actions_zero();
     }
     else if (strcmp(argv[1], "network_failure") == 0)
     {
-        leg_response_test.active = 1;
-        warmup();
-        network_success = 0;
-        ctrl_task_body();
-        assert(network_calls == 1 && !action_state.rl_ready);
-        all_actions_zero();
+        warmup(); network_success = 0; ctrl_task_body();
+        assert(network_calls == 1 && !action_state.rl_ready); all_actions_zero();
+    }
+    else if (strcmp(argv[1], "joint_roles") == 0)
+    {
+        float pos[4], vel[6];
+        const float expected_pos[4] = {-0.4f, 0.5f, 0.2f, -0.3f};
+        const float expected_vel[6] = {-3, -4, 6, 1, 2, -5};
+        assert(RL_Joint_Map(pos, vel));
+        for (i = 0; i < 4; i++) { near(pos[i], expected_pos[i]); }
+        for (i = 0; i < 6; i++) { near(vel[i], expected_vel[i]); }
+    }
+    else if (strcmp(argv[1], "default_pose") == 0)
+    {
+        leg_l.output.thigh_angle = machine->rl.zero[0] + 0.06f;
+        leg_r.output.thigh_angle = machine->rl.zero[2] + 0.06f;
+        leg_l.output.virtual_shank_angle = machine->rl.zero[1] - 0.10f;
+        leg_r.output.virtual_shank_angle = machine->rl.zero[3] - 0.10f;
+        build();
+        for (i = 9; i < 13; i++) { near(rl_control.observation.obs[i], 0); }
     }
     else { assert(!"unknown scenario"); }
-    puts(argv[1]);
-    return 0;
+    puts(argv[1]); return 0;
 }
 """
 
@@ -364,7 +349,7 @@ class RlCommandInputTest(unittest.TestCase):
         source = re.sub(r"^#include[^\n]*", "", source, flags=re.M)
         parts = [HEADERS]
         for name in ("dm_motor_state_t", "dji_motor_state_t", "motor_state_t",
-                     "action_state_t", "input_command_t", "leg_response_test_t"):
+                     "action_state_t", "input_command_t"):
             parts.append(production_type(header, name))
         parts.extend([STUBS, production_function(
             (ROOT / "imcalib/user-lib/dr16.c").read_text(encoding="utf-8"), "DR16_Deadline"),
@@ -393,9 +378,9 @@ class RlCommandInputTest(unittest.TestCase):
                        "-lm", "-o", str(executable)]
             result = subprocess.run(command, capture_output=True, text=True, env=environment)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            for scenario in ("fixed_range", "test_range_and_polarity", "deadband_and_offline",
-                             "observation_and_history", "inference_publication",
-                             "preview_no_inference", "invalid_source", "network_failure"):
+            for scenario in ("fixed_range", "deadband_and_offline", "observation_and_history",
+                             "inference_publication", "preview_no_inference", "invalid_source",
+                             "network_failure", "joint_roles", "default_pose"):
                 with self.subTest(scenario=scenario):
                     result = subprocess.run([str(executable), scenario], capture_output=True,
                                             text=True, env=environment)

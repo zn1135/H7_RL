@@ -5,7 +5,7 @@
 #include "usbd_cdc_if.h"
 #include "Vofa_send.h"
 #include "dma_cache.h"
-#include "s2r_build_info.h"
+#include "firmware_build_info.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -305,7 +305,7 @@ static void send_state(uint32_t seq)
     put_u32(payload + 8u, ctrl_fault);
     put_u32(payload + 12u, rx_overflow_total);
     put_u32(payload + 16u, rx_bad_frame);
-    memcpy(payload + 20u, S2R_SOURCE_SHA256, 64u);
+    memcpy(payload + 20u, FIRMWARE_SOURCE_SHA256, 64u);
     for (i = 0u; i < DM_MOTOR_NUM; i++)
     {
         put_f32(payload + 84u + 4u*i, torque_max[i]);
