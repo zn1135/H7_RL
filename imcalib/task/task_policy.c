@@ -139,11 +139,26 @@ static void RL_Command_From_Rc(float command[3])
     float yaw_max = RL_CMD_YAW_MAX;
     float height_min = RL_CMD_HEIGHT_MIN;
     float height_max = RL_CMD_HEIGHT_MAX;
+    float height = input_command.height_cmd;
+    float policy_dt = MACHINE_CTRL_DT * (float)MACHINE_POLICY_DIV;
+
+    if (height < height_min || height > height_max)
+    {
+        height = RL_CMD_HEIGHT_INIT;
+    }
+    if (output_task_rl_engaged() && rc_command.online)
+    {
+        height += rc_command.len * RL_CMD_HEIGHT_RATE * policy_dt;
+        height = clampf(height, height_min, height_max);
+    }
+    else
+    {
+        height = RL_CMD_HEIGHT_INIT;
+    }
 
     command[0] = rc_command.vel * vx_max;
     command[1] = -rc_command.yaw * yaw_max;
-    command[2] = height_min
-               + (rc_command.len + 1.0f) * 0.5f * (height_max - height_min);
+    command[2] = height;
     input_command.vx_cmd = command[0];
     input_command.yaw_cmd = command[1];
     input_command.height_cmd = command[2];
@@ -178,7 +193,7 @@ static void RL_Infer_Body(void)
     float inference_us = 0.0f;
 
     RL_Command_From_Rc(command);
-    engaged = output_task_rl_engaged();
+    engaged = (uint8_t)(output_task_rl_engaged() && !gas_spring_only_enabled);
 
     /* 未投入: 清历史 (预览观测照算供 VOFA), 发零动作保持新鲜 (LQR 挡也走这里) */
     if (!engaged)

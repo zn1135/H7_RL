@@ -192,7 +192,7 @@ CtrBoard-H7_ALL/
 | 串口底层 | uart_idle.c/h | ✅ 完成 |
 | 遥控器解析 | dr16.c/h | ✅ 完成，已实测 |
 | HI229 IMU | hi229.c/h | ✅ 完成 |
-| Vofa 调试发送 | Vofa_send.c/h | ✅ 完成，32 通道（上限 32）JustFloat DMA；通道表见 `task_comm.c` 的 `Robot_Control_Send_Vofa()` 上方注释 |
+| Vofa 调试发送 | Vofa_send.c/h | ✅ 完成，普通 38 / 追踪 32 通道（发送上限 38）JustFloat DMA；通道表见 `md/vofa_policy_trace.md` |
 | FDCAN 总线 | can_bus.c/h | ✅ 完成 |
 | DM 电机 | dm.c/h | ✅ 完成 |
 | 单调 ns 时钟 | mono_ns.c/h | ✅ 新增，DWT + TIM6 扩展；`Mono_Ns_Get()` 当前仅 `rl_policy.c` 用于推理耗时计量（CAN 收发时间戳是早期 sysid 规划，已随 sysid 模块移除） |
@@ -224,7 +224,7 @@ CtrBoard-H7_ALL/
 - **HI229 姿态**：直接使用模块输出的四元数 + 欧拉角，Attitude_Algorithm 只做归一化和单位转换；取轴与符号来自机器表 `machine->imu`（`task_imu.c` 应用），驱动 `hi229.c/h` 只出原始值
 - **标定**：500ms (200ms 暖机 + 300ms 采样)（历史记录：当前代码中已找不到对应标定/暖机流程，`imcalib`/`Core` 无相关实现；疑属已移除的 sysid/标定模块。作者 2026-09-25 确认：按现状保留为历史说明）
 - **串口接收**：IDLE+DMA Circular，不使用 Resync，任务层校验
-- **VOFA 调试**：普通帧是 32 通道 JustFloat（状态3 + obs25 + 大腿角2 + 腿长2），默认 UART8；失能且发送完成时写 `vofa_trace_requested=1` 切到策略追踪。字段见 [vofa_policy_trace.md](vofa_policy_trace.md)。USB CDC 留给关节 JID1，同一 USB 口与 VOFA 互斥。
+- **VOFA 调试**：普通帧是 38 通道 JustFloat（状态3 + obs25 + 四髋反馈力矩4 + 电机侧力矩指令4 + 腿长2，周期测试启用时覆盖 ch26～27），默认 UART8；失能且发送完成时写 `vofa_trace_requested=1` 切到 32 通道策略追踪。字段见 [vofa_policy_trace.md](vofa_policy_trace.md)。USB CDC 留给关节 JID1，同一 USB 口与 VOFA 互斥。
 - **DJI 力矩常数**：`per_raw` 按型号满电流堵转力矩 / 满 raw × (`machine->dji_gear_ratio` / 标准减速比) 缩放，见 `dji.c` 的 `Dji_Torque_To_Current()`；**Kt 绝对值仍待台架实测**
 - **机器切换**：改 `imcalib/user-lib/machine_config.h` 的 `MACHINE_DEFAULT`（两份表在 `machine_config.c`，含刻度、满量程、限幅、**极性**，以及 **IMU 取轴与符号 `.imu`**、**RL 关节映射 `.rl`**）；DM 的 PMAX/VMAX/TMAX 以电机实际配置为准，用达妙上位机读一次与配置表比对
 - **CMSIS-DSP**：CubeMX 的 X-CUBE-ALGOBUILD 只生成头文件 `Middlewares/ST/ARM/DSP/Inc/arm_math.h`（1.7.0），**不挂库、不加源**。本工程用源码方式：`imcalib/user-lib/arm_sin_f32.c` / `arm_cos_f32.c`（照抄 `Drivers/CMSIS/DSP/Source` 1.6.0）+ `arm_sin_table_f32.c`（只截 513 点 `sinTable_f32`），头文件走相对路径 `#include "../../Drivers/CMSIS/DSP/Include/arm_math.h"`；两套工程都不需要改包含目录，eIDE 靠 `srcDirs` 自动扫到，Keil 已登记进 `imcalib/user-lib` 组。**不要把 `arm_common_tables.c` 整个当源文件编**（armcc 不拆数据段，700 KB 表整段进 flash），**也不要挂 `Drivers/CMSIS/DSP/Lib/ARM` 下的 .lib**：目录里 19 个库只有 `arm_cortexM7lfdp_math.lib` 对应本机，多挂时 armlink 不报错、静默取第一个（软浮点）；eIDE 开着时手改 `eide.yml` 几秒内被覆盖。再要用别的 DSP 函数，照同样办法把对应源文件抄进 user-lib

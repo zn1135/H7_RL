@@ -298,8 +298,9 @@ class GasSpringTest(unittest.TestCase):
     def test_enabled_big_invalid_geometry_finite_checks_and_atomic_failure(self):
         self.run_case("on_big", 3)
 
-    def test_default_disabled_explicit_disabled_and_small_machine_bypass(self):
-        for variant in ("default_big", "off_big", "on_small"):
+    def test_default_enabled_explicit_disabled_and_small_machine_bypass(self):
+        self.run_case("default_big", 2)
+        for variant in ("off_big", "on_small"):
             with self.subTest(variant=variant):
                 self.run_case(variant, 4)
 

@@ -26,7 +26,7 @@ def without_includes(source):
 
 
 def production_function(source, name):
-    match = re.search(r"^(?:static\s+)?(?:void|float|uint8_t)\s+" + name + r"\([^)]*\)\s*\{", source, re.M)
+    match = re.search(r"^(?:static\s+)?(?:void|float|uint8_t|int16_t|uint16_t)\s+" + name + r"\([^)]*\)\s*\{", source, re.M)
     if match is None:
         raise AssertionError("missing production function: " + name)
     depth, end = 1, match.end()
@@ -202,8 +202,8 @@ static void reference_rl(float virtual_tau[6], float dm[4], float wheel[2])
         if (i == 2u || i == 5u)
         {
             side = i == 2u ? 0u : 1u;
-            target = reference_clip(actions[i] * 10.0f, 20.0f);
-            virtual_tau[i] = reference_clip(parameters.wheel_pid[side][0] * (target - velocity[i]), 3.9f);
+            target = actions[i] * 10.0f;
+            virtual_tau[i] = reference_clip(parameters.wheel_pid[side][0] * (target - velocity[i]), machine->dji_trq_clamp);
             wheel[side] = reference_clip(virtual_tau[i], machine->dji_trq_clamp);
         }
         else
@@ -211,7 +211,7 @@ static void reference_rl(float virtual_tau[6], float dm[4], float wheel[2])
             target = actions[i] * 0.5f + parameters.dof_pos[i];
             error = remainderf(target - q[i], 2.0f * LEG_PI);
             virtual_tau[i] = reference_clip(parameters.p_gains[i] * error
-                - parameters.d_gains[i] * velocity[i], 40.0f);
+                - parameters.d_gains[i] * velocity[i], machine->dm_trq_clamp);
         }
     }
     dm[0] = virtual_tau[0] + virtual_tau[1] * left_leg.output.vshank_jac[1];
@@ -361,6 +361,12 @@ static void rl_compensates_before_limit(void)
     reference_rl(virtual_tau, base, wheel);
     if (EXPECT_GAS_ACTIVE)
     {
+        /* Build a mapped sum above the shared virtual/motor bound. */
+        left_leg.output.vshank_jac[1] = -2.0f;
+        left_leg.output.force_map[0][0] = -1.1f / expected_force(&left_leg);
+        parameters.dof_pos[1] = left_leg.output.virtual_shank_angle - actions[1] * 0.5f
+            + (-0.5f + parameters.d_gains[1] * left_leg.output.d_virtual_shank_angle) / parameters.p_gains[1];
+        reference_rl(virtual_tau, base, wheel);
         delta = left_leg.output.force_map[0][0] * expected_force(&left_leg);
         assert(fabsf(delta) > 1.0f);
         desired_thigh = -delta - virtual_tau[1] * left_leg.output.vshank_jac[1];
@@ -541,6 +547,60 @@ static void production_output_gate(void)
     assert(!output_debug_dm_sent && output_debug_dji_sent);
 }
 
+static void full_motor_output(void)
+{
+    const float full_actions[6] = {0.0f, 0.0f, 100.0f, 0.0f, 0.0f, -100.0f};
+    const float stopped_wheels[2] = {0.0f, 0.0f};
+    const float moderate_actions[6] = {0.0f, 0.0f, 3.0f, 0.0f, 0.0f, -3.0f};
+    rl_torque_state_t controller;
+    torque_output_t torque;
+    unsigned i;
+
+    fixture_setup();
+    fixture_machine = machine_table[MACHINE_ID_BIG_WHEELLEG];
+    near(machine->dm_trq_clamp, 54.0f);
+    near(machine->dji_trq_clamp, 4.84375f);
+    memset(left_leg.output.force_map, 0, sizeof(left_leg.output.force_map));
+    memset(right_leg.output.force_map, 0, sizeof(right_leg.output.force_map));
+    left_leg.output.vshank_jac[0] = right_leg.output.vshank_jac[0] = 1.0f;
+    left_leg.output.vshank_jac[1] = right_leg.output.vshank_jac[1] = 0.0f;
+    left_leg.input.d_hip_f = left_leg.output.d_virtual_shank_angle = -100.0f;
+    right_leg.input.d_hip_f = right_leg.output.d_virtual_shank_angle = 100.0f;
+    RL_Torque_State_Init(&controller, &parameters);
+    Torque_Output_Clear(&torque);
+    assert(RL_Torque_Compute(&left_leg, &right_leg, &parameters,
+        stopped_wheels, full_actions, &controller, &torque));
+    for (i = 0u; i < 4u; i++)
+    {
+        near(torque.dm[i], i < 2u ? 54.0f : -54.0f);
+    }
+    near(torque.dji[0], 4.84375f); near(torque.dji[1], -4.84375f);
+    assert(Dji_Torque_To_Current(0u, torque.dji[0]) == 16384);
+    assert(Dji_Torque_To_Current(1u, torque.dji[1]) == -16384);
+    assert(Dji_Torque_To_Current(0u, 100.0f) == 16384);
+    assert(Dm_Float_To_Uint(torque.dm[0], -54.0f, 54.0f, 12u) == 4095u);
+    assert(Dm_Float_To_Uint(torque.dm[2], -54.0f, 54.0f, 12u) == 0u);
+
+    RL_Torque_State_Init(&controller, &parameters);
+    assert(RL_Torque_Compute(&left_leg, &right_leg, &parameters,
+        stopped_wheels, moderate_actions, &controller, &torque));
+    near(torque.dji[0], 3.0f); near(torque.dji[1], -4.5f);
+
+    fixture_setup();
+    fixture_machine = machine_table[MACHINE_ID_BIG_WHEELLEG];
+    memset(left_leg.output.force_map, 0, sizeof(left_leg.output.force_map));
+    memset(right_leg.output.force_map, 0, sizeof(right_leg.output.force_map));
+    memset(parameters.p_gains, 0, sizeof(parameters.p_gains));
+    parameters.d_gains[0] = parameters.d_gains[1] = 1.0f;
+    left_leg.input.d_hip_f = -30.0f;
+    left_leg.output.d_virtual_shank_angle = 25.0f;
+    RL_Torque_State_Init(&controller, &parameters);
+    assert(RL_Torque_Compute(&left_leg, &right_leg, &parameters,
+        stopped_wheels, moderate_actions, &controller, &torque));
+    near(torque.dm[0], 30.0f - 25.0f * left_leg.output.vshank_jac[1]);
+    assert(torque.dm[0] > 40.0f && torque.dm[0] < 54.0f);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -553,6 +613,7 @@ int main(int argc, char **argv)
     case 4: lqr_pid_baseline(); break;
     case 5: failures_dispatch_zero(); break;
     case 6: production_output_gate(); break;
+    case 7: full_motor_output(); break;
     default: assert(0); break;
     }
     return 0;
@@ -577,16 +638,20 @@ class GasSpringIntegrationTest(unittest.TestCase):
         rl_source = read("imcalib/Algorithm/rl_torque.c")
         rl_preamble = "\n".join(re.findall(r"^#define RL_TQ_\w+[^\n]*", rl_source, re.M))
         rl_preamble += "\n" + re.search(r"enum\s*\{[^}]*\bVJ_NUM\b[^}]*\};", rl_source).group()
-        dji_defines = "\n".join(re.findall(r"^#define DJI_MOTOR_(?:WHEEL_LFT|WHEEL_RGT|NUM)\s+[^\n]+", read("imcalib/user-lib/dji.h"), re.M))
+        dji_defines = "\n".join(re.findall(r"^#define DJI_\w+\s+[^\n]+", read("imcalib/user-lib/dji.h"), re.M))
         content = [
             HEADERS,
             production_enum(read("imcalib/user-lib/dm.h"), "dm_motor_idx_t"),
+            production_enum(read("imcalib/user-lib/dji.h"), "dji_motor_type_t"),
             dji_defines,
+            without_includes(read("imcalib/user-lib/machine_config.c")).split("const machine_cfg_t *const machine")[0],
             without_includes(read("imcalib/Algorithm/torque_output.h")),
             without_includes(read("imcalib/Algorithm/rl_torque.h")),
             without_includes(read("imcalib/Algorithm/lqr_balance.h")),
             without_includes(read("imcalib/Algorithm/leg_balance.h")),
             STUBS,
+            production_function(read("imcalib/user-lib/dji.c"), "Dji_Torque_To_Current"),
+            production_function(read("imcalib/user-lib/dm.c"), "Dm_Float_To_Uint"),
             without_includes(read("imcalib/Algorithm/gas_spring.c")),
             rl_preamble,
             *[production_function(rl_source, name) for name in (
@@ -642,17 +707,20 @@ class GasSpringIntegrationTest(unittest.TestCase):
     def test_real_output_dispatch_retains_total_switch_and_valid_gate(self):
         self.run_case(6)
 
+    def test_full_motor_output_reaches_wire_limits_and_preserves_mapped_torque(self):
+        self.run_case(7)
+
     def test_normal_vofa_layout_has_no_gas_page_hook(self):
         source = read("imcalib/task/task_comm.c")
         normal = production_function(source, "Robot_Control_Send_Vofa")
         self.assertNotIn("Robot_Control_Gas_Vofa", source)
         self.assertNotIn("gas_spring", normal)
         self.assertIn("dbg[i + 3] = rl_control.observation.obs[i]", normal)
-        self.assertIn("dbg[28] = leg_l.output.thigh_angle", normal)
-        self.assertIn("dbg[29] = leg_r.output.thigh_angle", normal)
-        self.assertIn("dbg[30] = leg_l.output.virtual_leg_length", normal)
-        self.assertIn("dbg[31] = leg_r.output.virtual_leg_length", normal)
-        self.assertIn("Vofa_Send(dbg, 32u)", normal)
+        self.assertIn("dbg[28u + motor_index] = motor_state.dm.trq_nm[motor_index]", normal)
+        self.assertIn("dbg[32u + motor_index] = rl_output_dm_cmd_nm[motor_index]", normal)
+        self.assertIn("dbg[36] = leg_l.output.virtual_leg_length", normal)
+        self.assertIn("dbg[37] = leg_r.output.virtual_leg_length", normal)
+        self.assertIn("Vofa_Send(dbg, VOFA_MAX_CH)", normal)
 
 
 if __name__ == "__main__":

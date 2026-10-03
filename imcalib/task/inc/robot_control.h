@@ -35,6 +35,7 @@ typedef enum {
     CTRL_STRATEGY_LQR,          /* LQR 平衡 */
     CTRL_STRATEGY_DISABLE,      /* 左下 / 离线 */
     CTRL_STRATEGY_JOINT_USB,    /* USB 台架 */
+    CTRL_STRATEGY_GAS_SPRING,  /* 弹簧台架 */
 } ctrl_strategy_t;
 
 typedef struct {
@@ -129,6 +130,7 @@ extern volatile control_time_debug_t control_time_debug;
 extern volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 extern volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
 extern uint8_t torque_output_enabled;
+extern volatile uint8_t gas_spring_only_enabled;
 extern osSemaphoreId ctrl_tick_sem_handle;
 extern osSemaphoreId policy_tick_sem_handle;
 

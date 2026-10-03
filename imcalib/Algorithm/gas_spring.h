@@ -5,7 +5,7 @@
 #include "leg_solver.h"
 
 #ifndef GAS_SPRING_COMP_ENABLE
-#define GAS_SPRING_COMP_ENABLE 0
+#define GAS_SPRING_COMP_ENABLE 1
 #endif
 
 float Leg_SpringF(float L0);

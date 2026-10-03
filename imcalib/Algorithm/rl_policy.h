@@ -6,14 +6,16 @@
 #include "rl_observation.h"
 #include "ai_platform.h"
 
-/* 推理路径: 遥控 → 策略指令的训练侧范围 (chuanliantui_standup_config: vx/yaw 恒 0, 高度 0.20 m) */
-#define RL_CMD_VX_MAX       0.0f    /* m/s, 起立策略训练域 [0, 0] */
-#define RL_CMD_YAW_MAX      0.0f    /* rad/s, 训练域 [0, 0] */
-#define RL_CMD_HEIGHT_MIN   0.20f   /* m, 机身高度目标; 解锁后固定 0.20 */
-#define RL_CMD_HEIGHT_MAX   0.20f   /* 同上, 拨轮无效 */
+/* 遥控目标范围 */
+#define RL_CMD_VX_MAX       0.0f    /* m/s */
+#define RL_CMD_YAW_MAX      0.0f    /* rad/s */
+#define RL_CMD_HEIGHT_MIN   0.15f   /* m */
+#define RL_CMD_HEIGHT_MAX   0.30f   /* m */
+#define RL_CMD_HEIGHT_INIT  0.23f   /* m */
+#define RL_CMD_HEIGHT_RATE  0.30f   /* m/s */
 
 /* 推理路径: 投入后先零动作 N 步, 只跑 PD + 历史 (训练: 首次轮接地前零动作; 实机轮已接地, 只留短预热) */
-#define RL_WARMUP_STEPS     300u
+#define RL_WARMUP_STEPS     10u
 
 /* 动作裁剪 (训练 normalization.clip_actions = 100) */
 #define RL_ACTION_CLIP      100.0f

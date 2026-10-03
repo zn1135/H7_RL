@@ -8,12 +8,12 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
         .lqr_configured = 0u,
         .dji_type       = 1u,                          /* M3508 + C620 */
         .dji_gear_ratio = 15.5f,                       /* 转子→轮子总减速比 */
-        .dji_trq_clamp  = 3.9f,                        /* 对齐训练侧轮关节力矩限幅 */
+        .dji_trq_clamp  = (0.30f * 20.0f) * (15.5f / 19.2f), /* 满电流 */
         .wheel_r        = 0.04f,                       /* 占位，待实测 */
         .dm_pos_max     = 3.14159f,                    /* DM-J8009P: 上位机 ±π */
         .dm_vel_max     = 45.0f,
         .dm_trq_max     = 54.0f,                       /* MIT 刻度, 勿改 */
-        .dm_trq_clamp   = 40.0f,                       /* 对齐训练侧腿关节力矩限幅 */
+        .dm_trq_clamp   = 54.0f,                       /* 满量程 */
         /* 极性: 前左/后左/前右/后右 */
         .dm_sign        = {{1, 1}, {1, 1}, {-1, -1}, {-1, -1}},
         .dji_sign       = {{1, 1}, {-1, -1}},

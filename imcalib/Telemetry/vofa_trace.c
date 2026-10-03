@@ -6,17 +6,18 @@
 #include <string.h>
 
 #define VOFA_TRACE_QUEUE_SIZE 32u
+#define VOFA_TRACE_CH 32u
 #define VOFA_TRACE_QUEUE_MASK (VOFA_TRACE_QUEUE_SIZE - 1u)
 #define VOFA_TRACE_SYNC_US 1000000u
 #define VOFA_TRACE_SEQ_MASK 0x00FFFFFFu
 
-#if VOFA_MAX_CH != 32u || RL_OBS_SIZE != 25u || RL_OBS_HISTORY_FRAMES != 5u
+#if VOFA_MAX_CH < VOFA_TRACE_CH || RL_OBS_SIZE != 25u || RL_OBS_HISTORY_FRAMES != 5u
 #error "VOFA trace layout requires 32 channels, 25 observations and 5 history frames"
 #endif
 
 /* 策略写，通信读 */
 static struct {
-    float frames[VOFA_TRACE_QUEUE_SIZE][VOFA_MAX_CH];
+    float frames[VOFA_TRACE_QUEUE_SIZE][VOFA_TRACE_CH];
     volatile uint8_t head;
     volatile uint8_t tail;
     uint32_t sequence;
@@ -30,10 +31,10 @@ static volatile uint8_t trace_enabled = 0u;
 static volatile uint8_t sync_requested = 1u;
 
 /* 帧首 */
-static void frame_begin(float frame[VOFA_MAX_CH], uint8_t kind,
+static void frame_begin(float frame[VOFA_TRACE_CH], uint8_t kind,
                         uint32_t sequence, uint64_t time_us, uint32_t flags)
 {
-    memset(frame, 0, VOFA_MAX_CH * sizeof(float));
+    memset(frame, 0, VOFA_TRACE_CH * sizeof(float));
     frame[0] = (float)kind;
     frame[1] = (float)(sequence & VOFA_TRACE_SEQ_MASK);
     frame[2] = (float)(time_us & 0xFFFFu);
@@ -43,7 +44,7 @@ static void frame_begin(float frame[VOFA_MAX_CH], uint8_t kind,
 }
 
 /* 策略入队 */
-static uint8_t frame_enqueue(const float frame[VOFA_MAX_CH])
+static uint8_t frame_enqueue(const float frame[VOFA_TRACE_CH])
 {
     uint8_t next = (uint8_t)((trace.head + 1u) & VOFA_TRACE_QUEUE_MASK);
 
@@ -52,7 +53,7 @@ static uint8_t frame_enqueue(const float frame[VOFA_MAX_CH])
         trace.dropped++;
         return 0u;
     }
-    memcpy(trace.frames[trace.head], frame, VOFA_MAX_CH * sizeof(float));
+    memcpy(trace.frames[trace.head], frame, VOFA_TRACE_CH * sizeof(float));
     __DMB();
     trace.head = next;
     return 1u;
@@ -104,7 +105,7 @@ void Vofa_Trace_Record(const imu_state_t *imu,
                        uint8_t rl_ready,
                        float inference_us)
 {
-    float frame[VOFA_MAX_CH];
+    float frame[VOFA_TRACE_CH];
     uint32_t flags;
     uint32_t sequence;
     uint64_t output_time_us;
@@ -201,7 +202,7 @@ uint8_t Vofa_Trace_Pump(void)
         return 1u;
     }
     __DMB();
-    if (Vofa_Send(trace.frames[tail], VOFA_MAX_CH))
+    if (Vofa_Send(trace.frames[tail], VOFA_TRACE_CH))
     {
         trace.tail = (uint8_t)((tail + 1u) & VOFA_TRACE_QUEUE_MASK);
     }

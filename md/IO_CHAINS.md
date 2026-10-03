@@ -1,5 +1,7 @@
 # 输入输出链路总览
 
+> 2026-10-03：默认开启仅气弹簧台架模式：实测腿长 → `Gas_Spring_Apply(零基础力矩)` → 四髋原限幅 → 唯一分发；轮命令为零，RL/LQR 不出力。退出与台架观测见 [gas-spring.md](gas-spring.md)。
+
 > 2026-09-24：Sysid、手动腿测、仅偏航测试已删除。下文若有旧测试阶段描述，以当前代码为准。
 
 > 最后更新：2026-09-25
@@ -290,7 +292,7 @@ lqr_balance.c (LQR, 左拨杆中位 + 右拨杆中位):
            作者确认为有意设计, 2026-09-25), wheel → 腿长目标 (机器区间 ∩ K 表域)
 
 task_policy.c (RL, 左拨杆上位 + 右拨杆中位):
-  ch1/ch0/wheel → vx/yaw_rate/height (RL_CMD_* 范围, 转向取负; 起立策略当前 vx/yaw 量程为 0、高度固定, 以 rl_policy.h 为准)
+  ch1/ch0/wheel → vx/yaw_rate/height (RL_CMD_* 范围; 前进与偏航上限按作者确认保留，拨轮按速率累加高度，回中保持目标)
 ```
 
 **dr16_t 字段:**
@@ -496,7 +498,7 @@ task_comm.c:
 | force_det / force_valid | 行列式 / 有效位 | 解算内部，force_valid 供 Force_Map_Forward 门控 |
 | point_jac[2][2] | P 点雅可比 | **无人消费**（计算后死输出） |
 
-**VOFA 观测：**普通帧是 32 路 JustFloat，含状态、完整 25 维观测、实体大腿角和腿长；策略追踪为独立 32 路布局。字段见 [vofa_policy_trace.md](vofa_policy_trace.md)，打包源为 `task_comm.c::Robot_Control_Send_Vofa()`。
+**VOFA 观测：**普通帧是 38 路 JustFloat，含状态、25 维观测、四髋电机侧反馈力矩/指令与左右腿长（周期测试启用时只覆盖 ch26～27）；策略追踪为独立 32 路布局。字段见 [vofa_policy_trace.md](vofa_policy_trace.md)，打包源为 `task_comm.c::Robot_Control_Send_Vofa()`。
 
 ---
 
@@ -506,8 +508,8 @@ task_comm.c:
 rc_command (遥控) → RL_Command_From_Rc() @ task_policy.c
     command[0] = vel × RL_CMD_VX_MAX
     command[1] = -yaw × RL_CMD_YAW_MAX        (转向取负, 同 LQR)
-    command[2] = 拨轮 → [RL_CMD_HEIGHT_MIN..MAX]
-    (起立策略当前 vx/yaw 量程为 0、高度固定, 以 rl_policy.h 的 RL_CMD_* 为准)
+    command[2] = 高度目标 + len × RL_CMD_HEIGHT_RATE × 策略周期，再夹到高度区间
+    (投入且遥控在线时积分，回中保持；未投入/离线恢复初始值。前进与偏航按 RL_CMD_* 量程映射)
 imu_state (IMU 姿态)
     gyro_rad_s[3]   → obs[0-2] × gyro_scale
     quat[4]         → obs[3-5]  投影重力 (RL_Observation_Project_Gravity)

@@ -172,7 +172,7 @@ static void Robot_Enable_Update(void)
         && ctrl_fault == FAULT_NONE && !robot_state.fallen);
     if (JointUsb_ModeLock())
     {
-        enable_request = JointUsb_EnableAllowed();
+        enable_request = (uint8_t)(!gas_spring_only_enabled && JointUsb_EnableAllowed());
     }
     if (enable_request && !robot_state.motor_enabled)
     {
@@ -196,13 +196,14 @@ static void Robot_Enable_Update(void)
     }
 }
 
-/* 普通 VOFA；周期测试覆盖 I26～I31 */
+/* 普通 VOFA；四髋检查 I28～I37 */
 static void Robot_Control_Send_Vofa(void)
 {
-    static float dbg[32];
+    static float dbg[VOFA_MAX_CH];
     uint8_t online_mask;
     uint16_t state_bits;
     uint32_t rl_bits;
+    uint8_t motor_index;
 #if CONTROL_TIME_VOFA_ENABLE
     control_time_debug_t time_sample;
 #endif
@@ -247,28 +248,26 @@ static void Robot_Control_Send_Vofa(void)
     {
         dbg[i + 3] = rl_control.observation.obs[i];
     }
-    // dbg[28] = leg_l.output.virtual_leg_length;
-    // dbg[29] = leg_r.output.virtual_leg_length;
-    // dbg[30] = leg_l.output.virtual_leg_angle;
-    // dbg[31] = leg_r.output.virtual_leg_angle;
-    dbg[28] = leg_l.output.thigh_angle;
-    dbg[29] = leg_r.output.thigh_angle;
-    dbg[30] = leg_l.output.virtual_leg_length;
-    dbg[31] = leg_r.output.virtual_leg_length;
-
 #if CONTROL_TIME_VOFA_ENABLE
     taskENTER_CRITICAL();
     time_sample = control_time_debug;
     taskEXIT_CRITICAL();
     dbg[26] = -2027.0f;
     dbg[27] = (float)(time_sample.sequence & 0x00FFFFFFu);
-    dbg[28] = (float)time_sample.period_us;
-    dbg[29] = (float)time_sample.min_period_us;
-    dbg[30] = (float)time_sample.max_period_us;
-    dbg[31] = (float)rl_control.policy.run_us;
 #endif
 
-    (void)Vofa_Send(dbg, 32u);
+    /* 四髋力矩对照 */
+    for (motor_index = 0u; motor_index < DM_MOTOR_NUM; motor_index++)
+    {
+        dbg[28u + motor_index] = motor_state.dm.trq_nm[motor_index]
+                              * (float)machine->dm_sign[motor_index].fb;
+        dbg[32u + motor_index] = rl_output_dm_cmd_nm[motor_index]
+                              * (float)machine->dm_sign[motor_index].out;
+    }
+    dbg[36] = leg_l.output.virtual_leg_length;
+    dbg[37] = leg_r.output.virtual_leg_length;
+
+    (void)Vofa_Send(dbg, VOFA_MAX_CH);
 }
 
 /* 通信单周期 */

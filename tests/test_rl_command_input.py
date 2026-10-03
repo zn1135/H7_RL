@@ -64,6 +64,7 @@ static struct {
     rl_policy_t policy;
 } rl_control;
 static uint8_t fixture_engaged, network_success;
+static uint8_t gas_spring_only_enabled;
 static unsigned network_calls, trace_calls, network_init_calls;
 static uint32_t fixture_tick;
 static float captured_obs[RL_OBS_SIZE], captured_history[RL_OBS_HISTORY_SIZE];
@@ -214,20 +215,36 @@ int main(int argc, char **argv)
     unsigned i, frame;
     assert(argc == 2);
     setup();
-    if (strcmp(argv[1], "fixed_range") == 0)
+    if (strcmp(argv[1], "gas_only_no_inference") != 0)
     {
-        rc(-660, -660, -660, -660, 1); commands(0, 0, 0.20f);
-        rc(0, 0, 0, 0, 1); commands(0, 0, 0.20f);
-        rc(660, 660, 660, 660, 1); commands(0, 0, 0.20f);
+        assert(RL_CMD_VX_MAX == 1.0f && RL_CMD_YAW_MAX == 3.0f);
+    }
+    if (strcmp(argv[1], "command_range") == 0)
+    {
+        float command[3];
+        fixture_engaged = 1;
+        rc(-660, -660, -660, -660, 1); commands(-1.0f, -3.0f, RL_CMD_HEIGHT_INIT - 0.003f);
+        rc(0, 0, 0, 0, 1); commands(0, 0, RL_CMD_HEIGHT_INIT - 0.003f);
+        rc(-660, -660, -660, -660, 1);
+        for (i = 0; i < 100; i++) { RL_Command_From_Rc(command); }
+        commands(-1.0f, -3.0f, RL_CMD_HEIGHT_MIN);
+        rc(660, 660, 660, 660, 1); commands(1.0f, 3.0f, RL_CMD_HEIGHT_MIN + 0.003f);
+        for (i = 0; i < 100; i++) { RL_Command_From_Rc(command); }
+        rc(1000, 1000, 1000, 1000, 1); commands(1.0f, 3.0f, RL_CMD_HEIGHT_MAX);
+        rc(-1000, -1000, -1000, -1000, 1);
+        for (i = 0; i < 100; i++) { RL_Command_From_Rc(command); }
+        rc(-1000, -1000, -1000, -1000, 1); commands(-1.0f, -3.0f, RL_CMD_HEIGHT_MIN);
     }
     else if (strcmp(argv[1], "deadband_and_offline") == 0)
     {
-        rc(20, 10, 20, 20, 1); commands(0, 0, 0.20f);
+        fixture_engaged = 1;
+        rc(20, 10, 20, 20, 1); commands(0, 0, RL_CMD_HEIGHT_INIT);
         near(rc_command.vel, 0); near(rc_command.yaw, 0); near(rc_command.len, 0);
         rc(21, 11, 21, 21, 1);
         assert(rc_command.vel > 0 && rc_command.yaw < 0 && rc_command.len > 0);
-        commands(0, 0, 0.20f);
-        rc(660, 660, 660, 660, 0); commands(0, 0, 0.20f);
+        commands(11.0f / 660.0f, 21.0f / 660.0f * 3.0f,
+            RL_CMD_HEIGHT_INIT + 21.0f / 660.0f * 0.003f);
+        rc(660, 660, 660, 660, 0); commands(0, 0, RL_CMD_HEIGHT_INIT);
         assert(!rc_command.online && !rc_command.s1 && !rc_command.s2);
     }
     else if (strcmp(argv[1], "observation_and_history") == 0)
@@ -235,7 +252,7 @@ int main(int argc, char **argv)
         float baseline[RL_OBS_SIZE], snapshots[6][RL_OBS_SIZE];
         build();
         memcpy(baseline, rl_control.observation.obs, sizeof(baseline));
-        near(baseline[6], 0); near(baseline[7], 0); near(baseline[8], 1);
+        near(baseline[6], 0); near(baseline[7], 0); near(baseline[8], RL_CMD_HEIGHT_INIT * 5.0f);
         for (frame = 0; frame < RL_OBS_HISTORY_FRAMES; frame++)
         {
             assert(!memcmp(&rl_control.observation.history[frame * RL_OBS_SIZE],
@@ -271,7 +288,8 @@ int main(int argc, char **argv)
         fixture_tick += 10; ctrl_task_body();
         assert(network_calls == 1 && action_state.updated && action_state.rl_ready);
         assert(action_state.last_ok_tick == fixture_tick);
-        near(captured_obs[6], 0); near(captured_obs[7], 0); near(captured_obs[8], 1);
+        near(captured_obs[6], 2.0f); near(captured_obs[7], 0.75f);
+        near(captured_obs[8], RL_CMD_HEIGHT_MAX * 5.0f);
         near(captured_obs[9], -0.34f); near(captured_obs[10], 0.40f);
         near(captured_obs[11], 0.14f); near(captured_obs[12], -0.20f);
         for (frame = 0; frame < RL_OBS_HISTORY_FRAMES; frame++)
@@ -293,15 +311,41 @@ int main(int argc, char **argv)
             near(captured_history[100 + 19 + i], network_action[i]);
         }
     }
+    else if (strcmp(argv[1], "command_changes") == 0)
+    {
+        warmup();
+        rc(0, 660, 660, 0, 1); ctrl_task_body();
+        near(captured_obs[6], 2.0f); near(captured_obs[7], 0);
+        near(captured_obs[8], (RL_CMD_HEIGHT_INIT + 0.003f) * 5.0f);
+        for (i = 0; i < 4; i++) { ctrl_task_body(); }
+        near(captured_obs[8], (RL_CMD_HEIGHT_INIT + 0.015f) * 5.0f);
+        rc(0, -660, -660, 0, 1); ctrl_task_body();
+        near(captured_obs[6], -2.0f); near(captured_obs[7], 0);
+        near(captured_obs[8], (RL_CMD_HEIGHT_INIT + 0.012f) * 5.0f);
+        near(captured_history[100 + 6], -2.0f);
+        near(captured_history[100 + 8], (RL_CMD_HEIGHT_INIT + 0.012f) * 5.0f);
+        near(captured_history[75 + 6], 2.0f);
+        near(captured_history[75 + 8], (RL_CMD_HEIGHT_INIT + 0.015f) * 5.0f);
+        rc(0, 0, 0, 0, 1); ctrl_task_body();
+        near(captured_obs[6], 0); near(captured_obs[7], 0);
+        near(captured_obs[8], (RL_CMD_HEIGHT_INIT + 0.012f) * 5.0f);
+        for (i = 0; i < 20; i++) { ctrl_task_body(); }
+        commands(0, 0, RL_CMD_HEIGHT_INIT + 0.012f);
+        fixture_engaged = 0; ctrl_task_body();
+        near(rl_control.observation.obs[8], RL_CMD_HEIGHT_INIT * 5.0f);
+        commands(0, 0, RL_CMD_HEIGHT_INIT);
+        fixture_engaged = 1; rc(0, 0, 660, 0, 1);
+        commands(0, 0, RL_CMD_HEIGHT_INIT + 0.003f);
+    }
     else if (strcmp(argv[1], "preview_no_inference") == 0)
     {
         rc(-660, 660, -660, 0, 1); ctrl_task_body();
         assert(network_calls == 0 && trace_calls == 1 && warmup_cnt == 0);
         assert(!action_state.rl_ready && !rl_control.observation.history_ready);
         all_actions_zero();
-        near(rl_control.observation.obs[6], 0);
-        near(rl_control.observation.obs[7], 0);
-        near(rl_control.observation.obs[8], 1);
+        near(rl_control.observation.obs[6], 2.0f);
+        near(rl_control.observation.obs[7], -0.75f);
+        near(rl_control.observation.obs[8], RL_CMD_HEIGHT_INIT * 5.0f);
     }
     else if (strcmp(argv[1], "invalid_source") == 0)
     {
@@ -309,6 +353,21 @@ int main(int argc, char **argv)
         assert(network_calls == 0 && !action_state.rl_ready && !warmup_cnt);
         assert(!rl_control.observation.valid && !rl_control.observation.history_ready);
         all_actions_zero();
+    }
+    else if (strcmp(argv[1], "gas_only_no_inference") == 0)
+    {
+        warmup();
+        gas_spring_only_enabled = 1;
+        for (i = 0; i < RL_WARMUP_STEPS + 2; i++)
+        {
+            ctrl_task_body();
+        }
+        assert(network_calls == 0 && warmup_cnt == 0);
+        assert(!action_state.rl_ready && !rl_control.observation.history_ready);
+        all_actions_zero();
+        gas_spring_only_enabled = 0;
+        warmup(); ctrl_task_body();
+        assert(network_calls == 1 && action_state.rl_ready);
     }
     else if (strcmp(argv[1], "network_failure") == 0)
     {
@@ -341,6 +400,14 @@ int main(int argc, char **argv)
 
 class RlCommandInputTest(unittest.TestCase):
     def test_real_rc_observation_and_publication_with_network_double(self):
+        self.run_scenarios(("command_range", "deadband_and_offline", "observation_and_history",
+                            "inference_publication", "command_changes", "preview_no_inference", "invalid_source",
+                            "network_failure", "joint_roles", "default_pose"))
+
+    def test_gas_only_suppresses_inference_and_restores_warmup(self):
+        self.run_scenarios(("gas_only_no_inference",))
+
+    def run_scenarios(self, scenarios):
         compiler = os.environ.get("CC") or shutil.which("gcc")
         if compiler is None:
             self.skipTest("no native C compiler; set CC to host gcc")
@@ -378,9 +445,7 @@ class RlCommandInputTest(unittest.TestCase):
                        "-lm", "-o", str(executable)]
             result = subprocess.run(command, capture_output=True, text=True, env=environment)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            for scenario in ("fixed_range", "deadband_and_offline", "observation_and_history",
-                             "inference_publication", "preview_no_inference", "invalid_source",
-                             "network_failure", "joint_roles", "default_pose"):
+            for scenario in scenarios:
                 with self.subTest(scenario=scenario):
                     result = subprocess.run([str(executable), scenario], capture_output=True,
                                             text=True, env=environment)

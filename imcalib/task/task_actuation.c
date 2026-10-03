@@ -5,6 +5,7 @@
 #include "tim.h"
 #include "mono_ns.h"
 #include "joint_usb.h"
+#include "gas_spring.h"
 
 /*
  * 输出任务三层结构 (作者 2026-09-22 定: 解算只算, 分发唯一):
@@ -84,6 +85,12 @@ uint8_t strategy_rc_enable(const rc_command_t *cmd)
     {
         return 0u; 
     }
+    if (gas_spring_only_enabled)
+    {
+        return (uint8_t)(GAS_SPRING_COMP_ENABLE
+            && MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
+            && cmd->s1 == DR16_SW_UP);
+    }
     if (cmd->s1 == DR16_SW_MID)
     {
         return machine->lqr_configured ? 1u : 0u;
@@ -98,6 +105,11 @@ uint8_t strategy_rc_enable(const rc_command_t *cmd)
 /* 左拨杆选模式: 先看 rc_enable(唯一判定), 再按挡位给策略 */
 static ctrl_strategy_t strategy_from_remote(const rc_command_t *cmd)
 {
+    if (gas_spring_only_enabled)
+    {
+        return strategy_rc_enable(cmd) && robot_state.rc_enable && !JointUsb_ModeLock()
+            ? CTRL_STRATEGY_GAS_SPRING : CTRL_STRATEGY_DISABLE;
+    }
     if (JointUsb_ModeLock())
     {
         return JointUsb_PhysicalPermit()
@@ -150,6 +162,29 @@ static void lqr_idle(void)
 }
 
 /* ================= 2 求解层: 只写 torque, 不下发 ================= */
+/* 仅弹簧补偿 */
+static void solve_gas_spring(torque_output_t *torque)
+{
+    const float base_dm[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float raw_dm[4];
+    float limit;
+    uint8_t i;
+
+    if (!(robot_state.rc_enable && robot_state.motor_enabled
+          && rc_command.online && rc_command.s1 == DR16_SW_UP
+          && rc_command.s2 == DR16_SW_MID)
+        || !Gas_Spring_Apply(&leg_l, &leg_r, base_dm, raw_dm))
+    {
+        return;
+    }
+    limit = machine->dm_trq_clamp;
+    for (i = 0u; i < DM_MOTOR_NUM; i++)
+    {
+        torque->dm[i] = clampf(raw_dm[i], -limit, limit);
+    }
+    torque->valid = 1u;
+}
+
 /* LQR 平衡: 目标 → 状态反馈 → 腿部力控 */
 static void solve_lqr(torque_output_t *torque)
 {
@@ -220,6 +255,11 @@ void output_task_body(void)
 
     switch (strategy)
     {
+    case CTRL_STRATEGY_GAS_SPRING:
+        lqr_idle();
+        solve_gas_spring(&torque);
+        break;
+
     case CTRL_STRATEGY_LQR:
     {
         if (rc_command.s2 == DR16_SW_MID && lqr_engage_update())

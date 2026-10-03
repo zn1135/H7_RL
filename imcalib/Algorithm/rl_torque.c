@@ -8,9 +8,6 @@
 
 #define RL_TQ_POS_SCALE        0.5f     /* 训练侧: 腿目标 = act × 0.5 + 默认角 */
 #define RL_TQ_WHEEL_VEL_SCALE  10.0f    /* 训练侧: 轮目标速度 = act × 10 */
-#define RL_TQ_WHEEL_VEL_MAX    20.0f    /* 轮目标速度限幅 */
-#define RL_TQ_LEG_TRQ_MAX      40.0f    /* 训练侧: 虚拟腿关节力矩上限 (映射前裁) */
-#define RL_TQ_WHEEL_TRQ_MAX    3.9f     /* 训练侧: 轮力矩上限 */
 #define RL_TQ_VSHANK_MIN       2.277f
 #define RL_TQ_VSHANK_MAX       3.133f
 
@@ -50,7 +47,7 @@ void RL_Torque_Param_Init(rl_torque_param_t *param, rl_model_t model)
     const rl_map_t *map = &machine->rl;
     const float dof_train[6] = {RL_OBS_DOF_POS_L_THIGH, RL_OBS_DOF_POS_L_SHANK, 0.0f,
                                 RL_OBS_DOF_POS_R_THIGH, RL_OBS_DOF_POS_R_SHANK, 0.0f};
-    float kp = 15.0f,kd = 1.0f;
+    float kp = 10.0f,kd = 1.0f;
     const float p_gains[6] = {kp,kp, 0.0f, kp,kp, 0.0f};   /* 训练 Kp */
     const float d_gains[6] = {kd, kd, 0.0f, kd, kd, 0.0f};       /* 训练 Kd */
 
@@ -169,10 +166,8 @@ uint8_t RL_Torque_Compute(const leg_state_t *leg_l, const leg_state_t *leg_r,
     pos_ref[VJ_L_SHANK] = action[VJ_L_SHANK] * RL_TQ_POS_SCALE;
     pos_ref[VJ_R_THIGH] = action[VJ_R_THIGH] * RL_TQ_POS_SCALE;
     pos_ref[VJ_R_SHANK] = action[VJ_R_SHANK] * RL_TQ_POS_SCALE;
-    vel_ref[VJ_L_WHEEL] = clampf(action[VJ_L_WHEEL] * RL_TQ_WHEEL_VEL_SCALE,
-        -RL_TQ_WHEEL_VEL_MAX, RL_TQ_WHEEL_VEL_MAX);
-    vel_ref[VJ_R_WHEEL] = clampf(action[VJ_R_WHEEL] * RL_TQ_WHEEL_VEL_SCALE,
-        -RL_TQ_WHEEL_VEL_MAX, RL_TQ_WHEEL_VEL_MAX);
+    vel_ref[VJ_L_WHEEL] = action[VJ_L_WHEEL] * RL_TQ_WHEEL_VEL_SCALE;
+    vel_ref[VJ_R_WHEEL] = action[VJ_R_WHEEL] * RL_TQ_WHEEL_VEL_SCALE;
 
     /* 虚拟关节 PD: 腿 Kp·wrap(目标 − q) − Kd·q̇, 轮 Kp·(v_ref − v) */
     for (uint32_t i = 0u; i < VJ_NUM; i++)
@@ -191,16 +186,18 @@ uint8_t RL_Torque_Compute(const leg_state_t *leg_l, const leg_state_t *leg_r,
                 CTRL_DT) - param->d_gains[i] * qd[i];
         }
     }
-    /* 训练侧虚拟关节力矩上限: Isaac 在映射前裁 */
+    /* 机器力矩上限 */
+    leg_limit = machine->dm_trq_clamp;
+    wheel_limit = machine->dji_trq_clamp;
     for (uint32_t i = 0u; i < VJ_NUM; i++)
     {
         if (i == VJ_L_WHEEL || i == VJ_R_WHEEL)
         {
-            tau_v[i] = clampf(tau_v[i], -RL_TQ_WHEEL_TRQ_MAX, RL_TQ_WHEEL_TRQ_MAX);
+            tau_v[i] = clampf(tau_v[i], -wheel_limit, wheel_limit);
         }
         else
         {
-            tau_v[i] = clampf(tau_v[i], -RL_TQ_LEG_TRQ_MAX, RL_TQ_LEG_TRQ_MAX);
+            tau_v[i] = clampf(tau_v[i], -leg_limit, leg_limit);
         }
     }
     memcpy(state->virtual_torque, tau_v, sizeof(state->virtual_torque));
@@ -218,14 +215,12 @@ uint8_t RL_Torque_Compute(const leg_state_t *leg_l, const leg_state_t *leg_r,
     }
 
     /* DM 输出 (满限幅) */
-    leg_limit = machine->dm_trq_clamp;
     torque->dm[DM_MOTOR_LEG_F_LFT] = clampf(raw_dm[0], -leg_limit, leg_limit);
     torque->dm[DM_MOTOR_LEG_B_LFT] = clampf(raw_dm[1], -leg_limit, leg_limit);
     torque->dm[DM_MOTOR_LEG_F_RGT] = clampf(raw_dm[2], -leg_limit, leg_limit);
     torque->dm[DM_MOTOR_LEG_B_RGT] = clampf(raw_dm[3], -leg_limit, leg_limit);
 
     /* DJI 输出 (满限幅) */
-    wheel_limit = machine->dji_trq_clamp;
     torque->dji[DJI_MOTOR_WHEEL_LFT] = clampf(tau_v[VJ_L_WHEEL], -wheel_limit, wheel_limit);
     torque->dji[DJI_MOTOR_WHEEL_RGT] = clampf(tau_v[VJ_R_WHEEL], -wheel_limit, wheel_limit);
 
