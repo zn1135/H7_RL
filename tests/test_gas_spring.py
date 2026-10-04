@@ -275,7 +275,7 @@ class GasSpringTest(unittest.TestCase):
                 *defines, "-I", str(folder), "-I", str(ROOT / "imcalib/Algorithm"),
                 "-I", str(ROOT / "imcalib/user-lib"), str(folder / "harness.c"),
                 str(folder / "gas_spring_host.c"), str(folder / "reference.c"),
-                str(ROOT / "imcalib/Algorithm/leg_solver.c"), "-lm", "-o", str(executable),
+                str(ROOT / "imcalib/Algorithm/leg_solver.c"), str(ROOT / "imcalib/user-lib/machine_config.c"), "-lm", "-o", str(executable),
             ], capture_output=True, text=True, env=cls.environment)
             if result.returncode:
                 raise AssertionError(result.stdout + result.stderr)

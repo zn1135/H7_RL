@@ -22,7 +22,7 @@ volatile uint8_t output_debug_dm_sent;
 volatile uint8_t output_debug_dji_sent;
 volatile control_time_debug_t control_time_debug;
 uint8_t torque_output_enabled;
-volatile uint8_t gas_spring_only_enabled = 1u;
+volatile uint8_t gas_spring_only_enabled = 0u;
 
 osSemaphoreDef(ctrl_tick_sem);
 osSemaphoreId ctrl_tick_sem_handle = NULL;
@@ -96,7 +96,7 @@ void Robot_Control_Init(void)
     }
     Action_State_Clear();
 
-    if (machine->lqr_configured)
+    if (LQR_Gain_Compatible())
     {
         LQR_Init(&lqr_state);
         Leg_Balance_Init(&leg_balance);

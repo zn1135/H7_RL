@@ -1,6 +1,5 @@
 #include "leg_balance.h"
 #include "gas_spring.h"
-#include "machine_config.h"
 
 #include <math.h>
 #include <string.h>
@@ -10,15 +9,12 @@ void Leg_Balance_Init(leg_balance_t *lb)
 {
     memset(lb, 0, sizeof(*lb));
 
-    PID_struct_init(&lb->leg_len[0], POSITION_PID, machine->lqr.leg_len[0].max_output,
-                    machine->lqr.leg_len[0].integral_limit, machine->lqr.leg_len[0].kp,
-                    machine->lqr.leg_len[0].ki, machine->lqr.leg_len[0].kd, 0.0f, 0.0f);
-    PID_struct_init(&lb->leg_len[1], POSITION_PID, machine->lqr.leg_len[1].max_output,
-                    machine->lqr.leg_len[1].integral_limit, machine->lqr.leg_len[1].kp,
-                    machine->lqr.leg_len[1].ki, machine->lqr.leg_len[1].kd, 0.0f, 0.0f);
-    PID_struct_init(&lb->roll, POSITION_PID, machine->lqr.roll.max_output,
-                    machine->lqr.roll.integral_limit, machine->lqr.roll.kp,
-                    machine->lqr.roll.ki, machine->lqr.roll.kd, 0.0f, 0.0f);
+    PID_struct_init(&lb->leg_len[0], POSITION_PID, LEG_BALANCE_OUT_MAX, 0.0f,
+                    LEG_BALANCE_LEN_KP, 0.0f, LEG_BALANCE_LEN_KD, 0.0f, 0.0f);
+    PID_struct_init(&lb->leg_len[1], POSITION_PID, LEG_BALANCE_OUT_MAX, 0.0f,
+                    LEG_BALANCE_LEN_KP, 0.0f, LEG_BALANCE_LEN_KD, 0.0f, 0.0f);
+    PID_struct_init(&lb->roll, POSITION_PID, LEG_BALANCE_OUT_MAX, 0.0f,
+                    LEG_BALANCE_ROLL_KP, 0.0f, LEG_BALANCE_ROLL_KD, 0.0f, 0.0f);
 }
 
 /* 清控制器历史与调试观测值 */
@@ -123,11 +119,13 @@ uint8_t Leg_Balance_Compute(leg_balance_t *lb, const lqr_state_t *st,
                    st->leg_len_tgt[1], dt);
     (void)pid_calc(&lb->roll, st->roll, 0.0f, dt);
 
-    /* 模型力矩转力域 */
+    /* 2. 力向量: 轮扭矩/虚拟髋扭矩来自 LQR, 足端力来自腿长+横滚+前馈
+     * Tp 取反: 本工程腿摆角与模型 θ_ll 反号, 广义力随之反号
+     * (Leg_Force_Map_Forward(F,Tp) ≡ Leg_Tougue(F,-Tp)) */
     Tp[0] = -st->u[LQR_U_BL];
     Tp[1] = -st->u[LQR_U_BR];
-    F[0] = lb->leg_len[0].pos_out + lb->roll.pos_out + machine->lqr.support_force[0];
-    F[1] = lb->leg_len[1].pos_out - lb->roll.pos_out + machine->lqr.support_force[1];
+    F[0] = lb->leg_len[0].pos_out + lb->roll.pos_out + LEG_BALANCE_F_FEEDFORWARD;
+    F[1] = lb->leg_len[1].pos_out - lb->roll.pos_out + LEG_BALANCE_F_FEEDFORWARD;
     if (!lqr_debug.hip_enable)
     {
         Tp[0] = 0.0f;
@@ -135,8 +133,8 @@ uint8_t Leg_Balance_Compute(leg_balance_t *lb, const lqr_state_t *st,
     }
     if (!lqr_debug.len_pid_enable)
     {
-        F[0] = machine->lqr.support_force[0];
-        F[1] = machine->lqr.support_force[1];
+        F[0] = LEG_BALANCE_F_FEEDFORWARD;
+        F[1] = LEG_BALANCE_F_FEEDFORWARD;
     }
     wheel[0] = lqr_debug.wheel_enable ? st->u[LQR_U_WL] : 0.0f;
     wheel[1] = lqr_debug.wheel_enable ? st->u[LQR_U_WR] : 0.0f;

@@ -1,21 +1,21 @@
 ST Edge AI Core v2.2.0-20266 2adc00962
-Created date          : 2026-09-26 17:05:38
-Parameters            : generate --target stm32h7 --name networkzn1 -m C:/Users/ynz/Desktop/model_6000_h723.onnx --compression none --verbosity 1 -O time --workspace C:/Users/ynz/AppData/Local/Temp/mxAI_workspace10266138746280015315792499180065620 --output C:/Users/ynz/.stm32cubemx/networkzn1_output
+Created date          : 2026-10-03 17:52:01
+Parameters            : generate --target stm32h7 --name networkzn1 -m C:/Users/ynz/Desktop/model_15000_h723.onnx --compression none --verbosity 1 -O time --workspace C:/Users/ynz/AppData/Local/Temp/mxAI_workspace12008680855020017057822158801700260 --output C:/Users/ynz/.stm32cubemx/networkzn1_output
 
 Exec/report summary (generate)
 -----------------------------------------------------------------------------------------------------------
-model file         :   C:\Users\ynz\Desktop\model_6000_h723.onnx                                           
+model file         :   C:\Users\ynz\Desktop\model_15000_h723.onnx                                          
 type               :   onnx                                                                                
 c_name             :   networkzn1                                                                          
 compression        :   none                                                                                
 options            :   allocate-inputs, allocate-outputs                                                   
 optimization       :   time                                                                                
 target/series      :   stm32h7                                                                             
-workspace dir      :   C:\Users\ynz\AppData\Local\Temp\mxAI_workspace10266138746280015315792499180065620   
+workspace dir      :   C:\Users\ynz\AppData\Local\Temp\mxAI_workspace12008680855020017057822158801700260   
 output dir         :   C:\Users\ynz\.stm32cubemx\networkzn1_output                                         
 model_fmt          :   float                                                                               
-model_name         :   model_6000_h723                                                                     
-model_hash         :   0x4899195601babb22a7c0b46cc151ad84                                                  
+model_name         :   model_15000_h723                                                                    
+model_hash         :   0xdca19cdb9c3745a6133481ab657e7d4b                                                  
 params #           :   38,825 items (151.66 KiB)                                                           
 -----------------------------------------------------------------------------------------------------------
 input 1/2          :   'observations', f32(1x25), 100 Bytes, activations                                   
@@ -31,7 +31,7 @@ ram (total)        :   1,112 B (1.09 KiB) = 1,112 + 0 + 0
 -----------------------------------------------------------------------------------------------------------
 (*) 'input'/'output' buffers are allocated in the activations buffer
 
-Model name - model_6000_h723
+Model name - model_15000_h723
 ------ ---------------------------------------------------- --------------- --------------- -------- -------------------------------- --- --------------- ------------------ ------------------- 
 m_id   layer (type,original)                                oshape          param/size          macc                     connected to   | c_size          c_macc             c_type              
 ------ ---------------------------------------------------- --------------- --------------- -------- -------------------------------- --- --------------- ------------------ ------------------- 
@@ -106,7 +106,7 @@ model/c-model: macc=43,817/43,401 -416(-0.9%) weights=155,300/155,300  activatio
 
 Generated C-graph summary
 ------------------------------------------------------------------------------------------------------------------------
-model name            : model_6000_h723
+model name            : model_15000_h723
 c-name                : networkzn1
 c-node #              : 13
 c-array #             : 29

@@ -5,7 +5,7 @@
 #include "usart.h"
 #include "machine_config.h"
 
-#define VOFA_MAX_CH  38u  /* 普通38/追踪32 */
+#define VOFA_MAX_CH  39u  /* 普通38/追踪32 */
 #define VOFA_TRANSPORT_UART 1u
 #define VOFA_TRANSPORT_USB  0u
 

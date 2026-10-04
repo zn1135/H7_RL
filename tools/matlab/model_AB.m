@@ -12,6 +12,17 @@ switch lower(model)
         if ~exist(gen, 'file'), build_sjtu5(gen); end
         if exist('AB_sjtu5_gen', 'file') ~= 2, addpath(cache_dir); rehash; end
         [A, B] = AB_sjtu5_gen(sjtu5_param_vec(m, lL, lR));
+        if isfield(m.ctrl, 'state_schema') && strcmp(m.ctrl.state_schema, 'hip')
+            T = eye(10);
+            T(1,5) = lL/2; T(1,7) = lR/2;
+            T(2,6) = lL/2; T(2,8) = lR/2;
+            A = T*A/T;
+            B = T*B;
+            % 固件前摆正，原上交状态后摆正。
+            S = diag([1,1,1,1,-1,-1,-1,-1,1,1]);
+            A = S*A*S;
+            B = S*B;
+        end
     case 'newton15'
         error('model_AB:notyet', 'newton15 在阶段 2 接入 (见 LQR_MATLAB_PLAN.md §六)');
     otherwise

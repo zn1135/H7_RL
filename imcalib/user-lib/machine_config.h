@@ -12,9 +12,7 @@
 #define MACHINE_LEG_NUM           4u
 #define MACHINE_WHEEL_NUM         2u
 
-/* 上电默认机器: 底层机型参数只改这一行。
- * LQR 增益表仅针对小轮腿，RL 模型仅针对大轮腿；控制器不能仅靠本宏互换。
- * FDCAN1/3 的数据阶段时序随机器切换；FDCAN2 保持 CubeMX 设置。 */
+/* 编译选机，参数与 K 表同步绑定。 */
 #ifndef MACHINE_DEFAULT
 #define MACHINE_DEFAULT           MACHINE_ID_BIG_WHEELLEG
 #endif
@@ -65,10 +63,63 @@ typedef struct {
     uint8_t configured;   /* 训练侧定义 + 台架核对后置 1 */
 } rl_map_t;
 
+typedef struct {
+    float kp;
+    float ki;
+    float kd;
+    float max_output;
+    float integral_limit;
+} machine_pid_cfg_t;
+
+typedef struct {
+    float dt;
+    float leg_len_init[2];
+    float leg_trim[2];
+    float pitch_trim;
+    float pos_target;
+    float vel_max;
+    float yaw_max;
+    float len_rate;
+    float vel_ramp;
+    float pos_arm_vel;
+    float lpf_alpha[3];             /* 三路低通 */
+    float kf_p0;
+    float kf_q;
+    float kf_r;
+    float kf_p_max;
+    machine_pid_cfg_t leg_len[2];
+    machine_pid_cfg_t roll;
+    float support_force[2];
+    uint8_t vel_src;
+    uint8_t yaw_hold;
+    uint8_t yaw_rate_hold;
+    uint8_t pos_hold;
+    uint8_t wheel_enable;
+    uint8_t hip_enable;
+    uint8_t len_pid_enable;
+} machine_lqr_cfg_t;
+
+typedef struct {
+    float len_min;
+    float len_max;
+    float bar_sum_sq;
+    float bar_prod2;
+    float anchor_sum_sq;
+    float anchor_prod2;
+    float phase;
+    float numerator_scale;
+    float denominator_scale;
+    float force_n;
+} machine_spring_cfg_t;
+
+extern const machine_spring_cfg_t machine_spring_leg3;
+
 /* 一台机器的全部参数 */
 typedef struct {
     const char *name;
     uint8_t     lqr_configured;     /* 此机器有匹配的 LQR 增益表 */
+    machine_lqr_cfg_t lqr;
+    const machine_spring_cfg_t *spring;
     /* 轮: 型号(0=M2006, 1=M3508) + 总传动比 + 满限幅力矩(Nm) */
     uint8_t     dji_type;
     float       dji_gear_ratio;

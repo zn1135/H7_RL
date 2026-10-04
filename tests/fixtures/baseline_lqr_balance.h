@@ -8,17 +8,16 @@
 #include "leg_solver.h"
 #include "simple-function.h"
 #include "kalman.h"
-#include "lqr_gain_table.h"
 
 /* 状态序 — 与 MATLAB 模型一致 */
 enum {
     LQR_X_S = 0,    /* 前进位移 m */
     LQR_X_DS,       /* 前进速度 m/s */
-    LQR_X_PHI,      /* 偏航角 rad */
+    LQR_X_PHI,      /* 偏航角 rad (不参与控制) */
     LQR_X_DPHI,     /* 偏航角速度 rad/s */
-    LQR_X_THL,      /* 左腿前摆角 rad */
+    LQR_X_THL,      /* 左腿摆角-世界系 rad */
     LQR_X_DTHL,     /* 左腿摆角速度 rad/s */
-    LQR_X_THR,      /* 右腿前摆角 rad */
+    LQR_X_THR,      /* 右腿摆角-世界系 rad */
     LQR_X_DTHR,     /* 右腿摆角速度 rad/s */
     LQR_X_THB,      /* 机体俯仰角 rad */
     LQR_X_DTHB,     /* 机体俯仰角速度 rad/s */
@@ -34,6 +33,15 @@ enum {
     LQR_U_NUM,
 };
 
+/* K 表拟合域 */
+#define LQR_K_LEN_MIN       0.13f
+#define LQR_K_LEN_MAX       0.23f
+
+/* 遥控量程 */
+#define LQR_RC_VEL_MAX      1.2f    /* m/s */
+#define LQR_RC_YAW_MAX      5.0f    /* rad/s */
+#define LQR_RC_LEN_RATE     0.3f    /* m/s */
+
 typedef struct {
     float   vel_leg_comp_sign; /* 速度补偿 */
     uint8_t vel_src;           /* 0 低通 1 卡尔曼 */
@@ -47,7 +55,6 @@ typedef struct {
     uint8_t wheel_enable;      /* 轮通道 */
     uint8_t hip_enable;        /* 髋通道 */
     uint8_t len_pid_enable;    /* 腿长PID */
-    uint8_t legacy_gain;       /* 小机旧表对照 */
     float   trq_max_wheel;     /* 轮限幅 */
     float   trq_max_hip;       /* 髋限幅 */
 } lqr_debug_t;
@@ -61,8 +68,6 @@ typedef struct {
     float len[2];                   /* 实测腿长 */
     float len_eval[2];              /* 上次增益求值腿长 */
     float whl[2];                   /* 轮对地角速度 (调试) */
-    uint8_t gain_valid;
-    uint8_t gain_legacy;
     uint8_t valid;                  /* 状态估计有效 */
     float ds_raw;                   /* 运动学速度 (未滤波) */
     float ds_lpf;                   /* 低通速度 */

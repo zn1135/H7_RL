@@ -132,3 +132,4 @@ uint8_t CDC_Configured_HS(void);
 #endif
 
 #endif /* __USBD_CDC_IF_H__ */
+

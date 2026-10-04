@@ -1,0 +1,21 @@
+==== 表号 small_wheelleg-sjtu5-20261004-1308 ====
+机器 small_wheelleg (MACHINE_ID_SMALL_WHEELLEG)   模型 sjtu5   拟合 poly22
+Q = diag([16000   1200   1000    870  11000    250  11000    250   7000    500])
+R = diag([5480  5480   650   650])
+网格 0.13:0.01:0.23 (11 点)   Ts = 0.001   腿数据取行 nearest
+scan_grid: 11x11 点, dlqr 成功 121/121, 标称 L=0.18 可控秩 10/10, 耗时 3.8 s
+fit_K: poly22, 拟合残差 max|K_fit-K_dlqr| = 0.0263 (相对 0.0202)
+float32 密网格 21x21: rho=0.99892882, 一拍延迟 rho=0.998928845
+10s 饱和线性仿真: 加权状态末值比例 2.10946955e-08, 饱和 0 拍
+闭环检查: 通过
+标称 lL=lR=0.18 的拟合 K (行 T_wl T_wr T_bl T_br, 列 s ds phi dphi th_ll dth_ll th_lr dth_lr th_b dth_b):
+   -1.1698   -0.9808   -0.2607   -0.2469    1.2828    0.0937    2.3804    0.1954   -0.9035   -0.1181
+   -1.1698   -0.9808    0.2607    0.2469    2.3804    0.1954    1.2828    0.0937   -0.9035   -0.1181
+    0.3435    0.1829    0.4035    0.4057   -7.4519   -0.5991    4.6946    0.3579   -3.3956   -0.6289
+    0.3435    0.1829   -0.4035   -0.4057    4.6946    0.3579   -7.4519   -0.5991   -3.3956   -0.6289
+
+emit: 已写 C:\Users\ynz\Desktop\s2rgap\H7_RL\tools\matlab\output\lqr_gain_small.c
+
+==== 闭环检查通过, 未部署 (CFG.deploy=false), 手动拷到 C:\Users\ynz\Desktop\s2rgap\H7_RL\imcalib\Algorithm\lqr_gain_small.c ====
+产物: C:\Users\ynz\Desktop\s2rgap\H7_RL\tools\matlab\output\lqr_gain_small.c
+报告: C:\Users\ynz\Desktop\s2rgap\H7_RL\tools\matlab\output\report_small_latest.txt

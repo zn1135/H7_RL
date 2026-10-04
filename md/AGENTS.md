@@ -1,5 +1,7 @@
 # AI 协作规范 — 轮腿平衡步兵 RL 部署
 
+> 2026-10-03 双机 LQR：公共控制链 + `machine_cfg_t.lqr` + 独立大小机器 K 表，当前契约见 [lqr-dual-machine.md](lqr-dual-machine.md)。原物理量红线保持。
+
 > 最后更新：2026-09-25
 > 适用：Claude / Cursor / Copilot / Codex / Gemini / Kimi Code 等任何 AI 助手。
 > 接手本仓库前**先读完这一篇**，再动手。
@@ -128,7 +130,7 @@ CtrBoard-H7_ALL/
 │   │   ├── leg_solver.c/h         ← 五连杆闭链 + 雅可比 (镜像/门控)
 │   │   ├── lqr_balance.c/h        ← LQR 状态估计 + 增益求值 + 状态反馈 + 遥控目标
 │   │   ├── leg_balance.c/h        ← 腿长/横滚 + 力域映射 + 力矩下发
-│   │   ├── lqr_gain_table.c/h     ← LQR 增益表 (MATLAB 生成物, 勿手改)
+│   │   ├── lqr_gain_table.c/h     ← 公共 K 表绑定/校验；lqr_gain_small/big.c 为生成物
 │   │   ├── torque_output.h        ← 公共力矩输出结构 (DM/DJI 分离)
 │   │   ├── rl_observation.c/h     ← RL 观测构建 + 5帧历史
 │   │   ├── rl_policy.c/h          ← CubeAI 推理封装 (单模型 networkzn1)
@@ -204,7 +206,7 @@ CtrBoard-H7_ALL/
 | 力矩执行层 | rl_torque.c/h | ✅ 完成，DM/DJI 分离输出 + 轮子 PID |
 | 任务框架 | task/robot_control.c + task_*.c | ✅ 完成，已上机验证 |
 | 遥控指令 | user-lib/rc_command.c/h | ✅ 四轴归一化 + 拨杆，commTask 填、其余只读；ch1 死区 10 |
-| LQR 增益表 | lqr_gain_table.c/h | ✅ 由 `tools/matlab/run_all.m` 管线生成物（勿手改），当前板上表为小机器 sjtu5 模型输出（表号/日期/Q/R 见 `lqr_gain_table.c` 头注释）；🟡 大机器表未接入（`machine_config.c` 大机器 `lqr_configured=0`）；历史：早期为参考上车表移植，已被 MATLAB 管线输出覆盖 |
+| LQR 增益表 | lqr_gain_table.c/h + lqr_gain_small/big.c | 公共入口自动绑定独立表；双机 sjtu5 髋轴口径已数值核验和编译，待台架；当前契约见 lqr-dual-machine.md |
 | LQR 状态估计与控制律 | lqr_balance.c/h | ✅ 编译通过，含 `lqr_debug` 运行时通道/限幅 A/B；🟡 **待台架** |
 | 腿部力控与下发 | leg_balance.c/h | ✅ 编译通过；🟡 **待台架** |
 | 策略仲裁 | task_actuation.c | ✅ 编译通过（左拨杆 中=LQR / 上=RL / 下=失能；右拨杆中位=投入，其他=零力矩）；🟡 待台架 |
@@ -217,8 +219,8 @@ CtrBoard-H7_ALL/
 
 - **时钟**：HSE 24MHz → PLL → SYSCLK 550MHz，APB1 137.5MHz，定时器时钟 275MHz
 - **控制频率**：actuationTask 由 TIM6 信号量驱动，频率随机器表编译期切换（`machine_config.h` 的 `MACHINE_TIM6_PERIOD`/`MACHINE_CTRL_DT`，`tim.c` USER CODE 2 里套用）：当前 `MACHINE_DEFAULT` = 大机器 → Period=1999 → **500 Hz**（`CTRL_DT=0.002f`，2026-09-26 起，变更 100），小机器 Period=999 → **1 kHz**（`CTRL_DT=0.001f`）。两者 Prescaler 均 274。LQR、RL 共用该节拍；policyTask 由同一节拍按 `MACHINE_POLICY_DIV` 分频唤醒（500/5、1000/10 = 100 Hz，变更 103）
-- **LQR 腿长工作区间**：机器表区间与 K 表拟合域 0.13~0.23 m 的交集，只夹拨轮目标；投入不查实测腿长（同 Leg2，变更 92），趴地投入靠腿长 PID 撑起
-- **LQR 辅助 PID**：当前保留左右腿长 PID 和横滚 PID；防劈叉 PID 已移除。参数以 `leg_balance.h` 为准，投入时清 PID 历史。腿长区间按本机自标，不照抄 Leg2（投入已不查实测腿长，无"投入下限"门槛）
+- **LQR 腿长工作区间**：机器表区间与当前所选 K 表域的交集，只夹拨轮目标；投入不查实测腿长（同 Leg2，变更 92），趴地投入靠腿长 PID 撑起
+- **LQR 辅助 PID**：当前保留左右腿长 PID 和横滚 PID；防劈叉 PID 已移除。参数以 `machine_config.c` 的 `.lqr` 为准，投入时清 PID 历史。腿长区间按本机自标，不照抄 Leg2（投入已不查实测腿长，无"投入下限"门槛）
 - **FDCAN**：HSE 24 MHz，仲裁段 1 Mbps = NominalPrescaler=3 / Seg1=5 / Seg2=2（`fdcan.c` 三路一致；**发**只发经典帧、只走仲裁段；**收**不挑帧格式，经典帧与 FD 帧都收——达妙跑 FD 1M/4M，回帧是 FD，见变更 101）。数据段参数写死在 `fdcan.c`（FDCAN1 = FD_BRS + 1/4/1，FDCAN2 = classic + 3/5/2，FDCAN3 = classic + 1/4/1），`machine_config.h` 的 `MACHINE_FDCAN13_DATA_*` 目前**不生效**（`main.c:74-94` 的套用函数整段注释掉了）——**换机器不改任何 CAN 时序**
 - **BMI088**：SPI 通信，驱动输出已是 rad/s 和 g，不要重复转换（单位换算以 `BMI088driver.h` 为准，待作者确认）。**当前未接入**：`main.c:160` `IMU_Init()` 已注释（"暂不使用"），驱动文件保留在 `imcalib/user-lib/`
 - **HI229 姿态**：直接使用模块输出的四元数 + 欧拉角，Attitude_Algorithm 只做归一化和单位转换；取轴与符号来自机器表 `machine->imu`（`task_imu.c` 应用），驱动 `hi229.c/h` 只出原始值

@@ -1,22 +1,46 @@
 #include "machine_config.h"
 
+/* Leg3 原模型常量 */
+const machine_spring_cfg_t machine_spring_leg3 = {
+    0.05F, 0.45F, 0.1066F, 0.105F, 0.0473512858F,
+    0.0206288453F, 0.213803F, 0.0103144227F, 0.0525F, 150.0F
+};
+
 /* 两份电机配置表: 换机器改 machine_config.h 的 MACHINE_DEFAULT */
 const machine_cfg_t machine_table[MACHINE_NUM] = {
     [MACHINE_ID_BIG_WHEELLEG] = {
         .name           = "big_wheelleg",
-        /* TODO: 为大轮腿生成并接入专用 LQR 增益表，当前增益只针对小轮腿。 */
-        .lqr_configured = 0u,
+        /* 匹配表已接入，控制待台架。 */
+        .lqr_configured = 1u,
+        .spring = &machine_spring_leg3,
+        .lqr = {
+            .dt = 0.002f,
+            .leg_len_init = {0.18f, 0.18f},
+            .leg_trim = {-0.04f, -0.04f},
+            .pitch_trim = 0.0f, .pos_target = 0.0f,
+            .vel_max = 1.2f, .yaw_max = 5.0f, .len_rate = 0.3f,
+            .vel_ramp = 5.0f, .pos_arm_vel = 0.0f,
+            .lpf_alpha = {0.51f, 0.51f, 0.51f},
+            .kf_p0 = 0.1f, .kf_q = 0.014f, .kf_r = 0.01f, .kf_p_max = 0.5f,
+            .leg_len = {{1000.0f, 0.0f, 25000.0f, 5000.0f, 0.0f},
+                        {1000.0f, 0.0f, 25000.0f, 5000.0f, 0.0f}},
+            .roll = {500.0f, 0.0f, 50.0f, 5000.0f, 0.0f},
+            .support_force = {20.534f * 9.81f * 0.5f, 20.534f * 9.81f * 0.5f},
+            .vel_src = 1u, .yaw_hold = 1u, .yaw_rate_hold = 1u,
+            .pos_hold = 1u, .wheel_enable = 1u, .hip_enable = 1u,
+            .len_pid_enable = 1u,
+        },
         .dji_type       = 1u,                          /* M3508 + C620 */
         .dji_gear_ratio = 15.5f,                       /* 转子→轮子总减速比 */
         .dji_trq_clamp  = (0.30f * 20.0f) * (15.5f / 19.2f), /* 满电流 */
-        .wheel_r        = 0.04f,                       /* 占位，待实测 */
+        .wheel_r        = 0.0525f,                     /* 作者确认 */
         .dm_pos_max     = 3.14159f,                    /* DM-J8009P: 上位机 ±π */
         .dm_vel_max     = 45.0f,
         .dm_trq_max     = 54.0f,                       /* MIT 刻度, 勿改 */
         .dm_trq_clamp   = 54.0f,                       /* 满量程 */
         /* 极性: 前左/后左/前右/后右 */
         .dm_sign        = {{1, 1}, {1, 1}, {-1, -1}, {-1, -1}},
-        .dji_sign       = {{1, 1}, {-1, -1}},
+        .dji_sign       = {{-1, -1}, {1, 1}},
         /* 总线: 腿 4 台全在 FDCAN1, 轮在 FDCAN3 */
         .dm_bus         = {1, 1, 1, 1},
         .dji_bus        = 3,
@@ -55,6 +79,24 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
         .name           = "small_wheelleg",
         /* 小轮腿目前只使用 LQR。TODO: 训练小轮腿 RL 模型后再配置关节映射并启用。 */
         .lqr_configured = 1u,
+        .spring = 0,
+        .lqr = {
+            .dt = 0.001f,
+            .leg_len_init = {0.14f, 0.14f},
+            .leg_trim = {-0.04f, -0.04f},
+            .pitch_trim = 0.0f, .pos_target = 0.10f,
+            .vel_max = 1.2f, .yaw_max = 5.0f, .len_rate = 0.3f,
+            .vel_ramp = 5.0f, .pos_arm_vel = 0.0f,
+            .lpf_alpha = {0.3f, 0.3f, 0.3f},
+            .kf_p0 = 0.1f, .kf_q = 0.007f, .kf_r = 0.01f, .kf_p_max = 0.5f,
+            .leg_len = {{2500.0f, 0.0f, 10000.0f, 5000.0f, 0.0f},
+                        {2500.0f, 0.0f, 10000.0f, 5000.0f, 0.0f}},
+            .roll = {200.0f, 0.0f, 50.0f, 5000.0f, 0.0f},
+            .support_force = {8.0f, 8.0f},
+            .vel_src = 1u, .yaw_hold = 1u, .yaw_rate_hold = 1u,
+            .pos_hold = 1u, .wheel_enable = 1u, .hip_enable = 1u,
+            .len_pid_enable = 1u,
+        },
         .dji_type       = 0u,                          /* M2006 */
         .dji_gear_ratio = 36.0f,
         .dji_trq_clamp  = 1.8f,                        /* 满限幅 = 0.18 Nm/A × 10A */

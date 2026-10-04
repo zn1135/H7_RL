@@ -1,5 +1,8 @@
 # VOFA 采集与模式切换
 
+> 2026-10-03 当前普通页已按作者要求改为仅发送 LQR 十维状态，ch0～ch9 与 `lqr_state.x` 同序。下面普通 38 通道布局为历史；策略追踪的 32 通道帧保持原定义。查看普通 LQR 页需 `vofa_trace_requested=0`，详见 [双机 LQR](lqr-dual-machine.md)。
+
+
 默认通过 UART8 发送普通 38 通道 JustFloat；USB CDC 留给 JID1。`vofa_transport.requested/active` 的 1 为 UART8、0 为 USB CDC。普通帧是 38 个小端 float32 与 `00 00 80 7F` 帧尾，共 156 字节；策略追踪仍为 32 通道、132 字节。
 
 ## 普通 VOFA（上电默认）

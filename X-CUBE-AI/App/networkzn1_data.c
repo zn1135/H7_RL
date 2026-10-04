@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    networkzn1_data.c
   * @author  AST Embedded Analytics Research Platform
-  * @date    2026-09-26T17:05:37+0800
+  * @date    2026-10-03T17:52:00+0800
   * @brief   AI Tool Automatic Code Generator for Embedded NN computing
   ******************************************************************************
   * @attention

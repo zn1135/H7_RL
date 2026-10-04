@@ -4,7 +4,7 @@
 #include <math.h>
 
 /* Leg3 同机模型，输出伸腿力 N */
-float Leg_SpringF(float L0)
+static float Spring_Force(const machine_spring_cfg_t *model, float L0)
 {
     float sqrt_tmp1;
     float theta;
@@ -13,13 +13,18 @@ float Leg_SpringF(float L0)
     {
         return NAN;
     }
-    L0 = fminf(fmaxf(L0, 0.05F), 0.45F);
-    theta = acosf((0.1066F - L0 * L0) / 0.105F);
-    arm_sqrt_f32(fmaxf(0.0473512858F -
-        0.0206288453F * arm_cos_f32(theta - 0.213803F), 0.0F), &sqrt_tmp1);
-    return 150.0F *
-        (0.0103144227F * arm_sin_f32(theta - 0.213803F) * L0 /
-        fmaxf(0.0525F * arm_sin_f32(theta) * sqrt_tmp1, 1.0E-6F));
+    L0 = fminf(fmaxf(L0, model->len_min), model->len_max);
+    theta = acosf((model->bar_sum_sq - L0 * L0) / model->bar_prod2);
+    arm_sqrt_f32(fmaxf(model->anchor_sum_sq -
+        model->anchor_prod2 * arm_cos_f32(theta - model->phase), 0.0F), &sqrt_tmp1);
+    return model->force_n *
+        (model->numerator_scale * arm_sin_f32(theta - model->phase) * L0 /
+        fmaxf(model->denominator_scale * arm_sin_f32(theta) * sqrt_tmp1, 1.0E-6F));
+}
+
+float Leg_SpringF(float L0)
+{
+    return Spring_Force(&machine_spring_leg3, L0);
 }
 
 /* 抵消伸腿力后叠加原力矩 */
@@ -28,7 +33,7 @@ uint8_t Gas_Spring_Apply(const leg_state_t *left, const leg_state_t *right,
 {
     float result[4];
     uint8_t i;
-#if GAS_SPRING_COMP_ENABLE && MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
+#if GAS_SPRING_COMP_ENABLE
     const leg_state_t *leg[2];
     float delta[2];
     float force;
@@ -58,26 +63,29 @@ uint8_t Gas_Spring_Apply(const leg_state_t *left, const leg_state_t *right,
             return 0u;
         }
     }
-#if GAS_SPRING_COMP_ENABLE && MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
-    leg[0] = left;
-    leg[1] = right;
-    for (side = 0u; side < 2u; side++)
+#if GAS_SPRING_COMP_ENABLE
+    if (machine->spring != NULL)
     {
-        if (leg[side] == NULL || !leg[side]->output.valid || !leg[side]->output.force_valid)
+        leg[0] = left;
+        leg[1] = right;
+        for (side = 0u; side < 2u; side++)
         {
-            return 0u;
-        }
-        force = -Leg_SpringF(leg[side]->output.virtual_leg_length);
-        if (!isfinite(force) || !Leg_Force_Map_Forward(leg[side], force, 0.0f, delta)
-            || !isfinite(delta[0]) || !isfinite(delta[1]))
-        {
-            return 0u;
-        }
-        result[side * 2u] += delta[0];
-        result[side * 2u + 1u] += delta[1];
-        if (!isfinite(result[side * 2u]) || !isfinite(result[side * 2u + 1u]))
-        {
-            return 0u;
+            if (leg[side] == NULL || !leg[side]->output.valid || !leg[side]->output.force_valid)
+            {
+                return 0u;
+            }
+            force = -Spring_Force(machine->spring, leg[side]->output.virtual_leg_length);
+            if (!isfinite(force) || !Leg_Force_Map_Forward(leg[side], force, 0.0f, delta)
+                || !isfinite(delta[0]) || !isfinite(delta[1]))
+            {
+                return 0u;
+            }
+            result[side * 2u] += delta[0];
+            result[side * 2u + 1u] += delta[1];
+            if (!isfinite(result[side * 2u]) || !isfinite(result[side * 2u + 1u]))
+            {
+                return 0u;
+            }
         }
     }
 #else

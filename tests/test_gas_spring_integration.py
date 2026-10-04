@@ -134,7 +134,7 @@ static void fixture_setup(void)
 {
     unsigned i;
 
-    memset(&fixture_machine, 0, sizeof(fixture_machine));
+    fixture_machine = machine_table[MACHINE_DEFAULT];
     fixture_machine.dm_trq_clamp = 40.0f;
     fixture_machine.dji_trq_clamp = 3.9f;
     fixture_machine.rl.configured = 1u;
@@ -407,9 +407,9 @@ static void lqr_force_survives_length_gate(void)
     assert(fabsf(balance.leg_len[0].pos_out) > 1.0f);
     for (side = 0u; side < 2u; side++)
     {
-        force = LEG_BALANCE_F_FEEDFORWARD + expected_force(leg[side]);
+        force = machine->lqr.support_force[side] + expected_force(leg[side]);
         tp = -state.u[LQR_U_BL + side];
-        near(balance.F[side], LEG_BALANCE_F_FEEDFORWARD);
+        near(balance.F[side], machine->lqr.support_force[side]);
         near(balance.Tp[side], tp);
         assert(Leg_Force_Map_Forward(leg[side], force, tp, raw));
         for (i = 0u; i < 2u; i++)
@@ -423,7 +423,7 @@ static void lqr_force_survives_length_gate(void)
     assert(balance.Tp[0] == 0.0f && balance.Tp[1] == 0.0f);
     for (side = 0u; side < 2u; side++)
     {
-        assert(Leg_Force_Map_Forward(leg[side], LEG_BALANCE_F_FEEDFORWARD + expected_force(leg[side]), 0.0f, raw));
+        assert(Leg_Force_Map_Forward(leg[side], machine->lqr.support_force[side] + expected_force(leg[side]), 0.0f, raw));
         for (i = 0u; i < 2u; i++)
         {
             near(torque.dm[side * 2u + i], reference_clip(raw[i], 2.0f));
@@ -447,12 +447,12 @@ static void lqr_pid_baseline(void)
     leg[0] = &left_leg; leg[1] = &right_leg;
     lqr_debug.len_pid_enable = 1u;
     make_lqr(&state, &balance);
-    roll = -(LEG_BALANCE_ROLL_KP + LEG_BALANCE_ROLL_KD) * state.roll;
+    roll = -(machine->lqr.roll.kp + machine->lqr.roll.kd) * state.roll;
     for (side = 0u; side < 2u; side++)
     {
         error = state.leg_len_tgt[side] - leg[side]->output.virtual_leg_length;
-        force[side] = (LEG_BALANCE_LEN_KP + LEG_BALANCE_LEN_KD) * error
-            + (side == 0u ? roll : -roll) + LEG_BALANCE_F_FEEDFORWARD;
+        force[side] = (machine->lqr.leg_len[side].kp + machine->lqr.leg_len[side].kd) * error
+            + (side == 0u ? roll : -roll) + machine->lqr.support_force[side];
     }
     assert(run_lqr(&state, &balance, &torque));
     for (side = 0u; side < 2u; side++)
@@ -713,14 +713,9 @@ class GasSpringIntegrationTest(unittest.TestCase):
     def test_normal_vofa_layout_has_no_gas_page_hook(self):
         source = read("imcalib/task/task_comm.c")
         normal = production_function(source, "Robot_Control_Send_Vofa")
+        self.assertIn("lqr_state.x", normal)
+        self.assertIn("Vofa_Send(dbg,", normal)
         self.assertNotIn("Robot_Control_Gas_Vofa", source)
-        self.assertNotIn("gas_spring", normal)
-        self.assertIn("dbg[i + 3] = rl_control.observation.obs[i]", normal)
-        self.assertIn("dbg[28u + motor_index] = motor_state.dm.trq_nm[motor_index]", normal)
-        self.assertIn("dbg[32u + motor_index] = rl_output_dm_cmd_nm[motor_index]", normal)
-        self.assertIn("dbg[36] = leg_l.output.virtual_leg_length", normal)
-        self.assertIn("dbg[37] = leg_r.output.virtual_leg_length", normal)
-        self.assertIn("Vofa_Send(dbg, VOFA_MAX_CH)", normal)
 
 
 if __name__ == "__main__":

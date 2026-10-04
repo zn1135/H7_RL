@@ -1,35 +1,49 @@
-/*
- * File: LQR_K_WBR.h
- *
- * WBR LQR 最优反馈增益矩阵 —— 由 MATLAB Symbolic Math Toolbox 生成。
- *
- * 来源: Leg2_v1/Code/Matlab/LQR_K_WBR.{c,h} 原样移植 (上交轮腿, 机械构造与本机一致)。
- * 内容: 240 个 poly22 系数, K = c + a*lL + b*lR + d*lL^2 + e*lR^2 + f*lL*lR,
- *       拟合域 lL, lR ∈ 0.13~0.23 m。
- * 用法: LQR_K_WBR(h_l, h_r, K_sym) → K_sym[状态*4 + 输出]。
- * 注意: 本文件为生成物, 不要手改; 换用自研脚本增益时整表替换即可。
- */
+#ifndef LQR_GAIN_TABLE_H
+#define LQR_GAIN_TABLE_H
 
-#ifndef LQR_K_WBR_H
-#define LQR_K_WBR_H
+#include <stdint.h>
+#include "machine_config.h"
 
-#include <stddef.h>
-#include <stdlib.h>
+#define LQR_STATE_HIP_FRONT_V2 2u
+#define LQR_INPUT_WHEELS_HIPS_V1 1u
 
-#ifdef __cplusplus
-extern "C" {
+typedef void (*lqr_gain_eval_t)(float lL, float lR, float K[40]);
+typedef struct {
+    const char *table_id;
+    const char *model;
+    uint8_t machine_id;
+    uint8_t state_schema;
+    uint8_t input_schema;
+    uint8_t checked;
+    float dt;
+    float len_min;
+    float len_max;
+    float wheel_r;
+    float leg_lu;
+    float leg_lg;
+    float x_eq[10];
+    float u_eq[4];
+    lqr_gain_eval_t eval;
+} lqr_gain_desc_t;
+
+enum {
+    LQR_GAIN_OK = 0,
+    LQR_GAIN_BAD_TABLE,
+    LQR_GAIN_BAD_MACHINE,
+    LQR_GAIN_BAD_SCHEMA,
+    LQR_GAIN_BAD_PERIOD,
+    LQR_GAIN_BAD_GEOMETRY,
+    LQR_GAIN_BAD_DOMAIN,
+};
+
+extern const lqr_gain_desc_t lqr_gain_small;
+extern const lqr_gain_desc_t lqr_gain_big;
+const lqr_gain_desc_t *LQR_Gain_Info(void);
+uint8_t LQR_Gain_Check(const lqr_gain_desc_t *gain, const machine_cfg_t *cfg,
+                       uint8_t machine_id, float dt);
+uint8_t LQR_Gain_Compatible(void);
+uint8_t LQR_Ready(void);
+uint8_t LQR_Gain_Eval(float lL, float lR, float K[40], uint8_t legacy);
+void LQR_K_WBR(float lL, float lR, float K[40]);
+
 #endif
-
-/* Function Declarations */
-extern void LQR_K_WBR(float lL, float lR, float K_sym[40]);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif
-/*
- * File trailer for LQR_K_WBR.h
- *
- * [EOF]
- */

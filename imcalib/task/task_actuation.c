@@ -88,12 +88,12 @@ uint8_t strategy_rc_enable(const rc_command_t *cmd)
     if (gas_spring_only_enabled)
     {
         return (uint8_t)(GAS_SPRING_COMP_ENABLE
-            && MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
+            && machine->spring != NULL
             && cmd->s1 == DR16_SW_UP);
     }
     if (cmd->s1 == DR16_SW_MID)
     {
-        return machine->lqr_configured ? 1u : 0u;
+        return LQR_Ready();
     }
     if (cmd->s1 == DR16_SW_UP)
     {
@@ -188,12 +188,19 @@ static void solve_gas_spring(torque_output_t *torque)
 /* LQR 平衡: 目标 → 状态反馈 → 腿部力控 */
 static void solve_lqr(torque_output_t *torque)
 {
-    (void)LQR_Target_Update(&lqr_state, &rc_command, CTRL_DT);
+    if (!LQR_Target_Update(&lqr_state, &rc_command, CTRL_DT))
+    {
+        return;
+    }
     if (!lqr_state.valid)
     {
         return;
     }
     LQR_Control_Update(&lqr_state);
+    if (!lqr_state.gain_valid)
+    {
+        return;
+    }
     torque->valid = Leg_Balance_Compute(&leg_balance, &lqr_state, &leg_l, &leg_r,
                                         CTRL_DT, torque);
 }
@@ -242,7 +249,7 @@ void output_task_body(void)
     wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
 
     /* 1 估计: 每拍必算 (同 RL 观测) */
-    if (machine->lqr_configured)
+    if (LQR_Gain_Compatible())
     {
         (void)LQR_State_Update(&lqr_state, &imu_state, &leg_l, &leg_r, wheel_vel, CTRL_DT);
     }

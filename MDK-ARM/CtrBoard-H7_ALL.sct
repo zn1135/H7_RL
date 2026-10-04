@@ -5,22 +5,10 @@ LR_IROM1 0x08000000 0x00100000  {    ; load region size_region
    .ANY (+RO)
    .ANY (+XO)
   }
-  RW_USB 0x2404C000 0x00004000  {  ; USB DMA 非缓存区
-   usb_device.o (+RW +ZI)
-   usbd_desc.o (+RW +ZI)
-   usbd_cdc_if.o (+RW +ZI)
-   usbd_conf.o (+RW +ZI)
-   usbd_cdc.o (+RW +ZI)
-   usbd_core.o (+RW +ZI)
-   usbd_ctlreq.o (+RW +ZI)
-   usbd_ioreq.o (+RW +ZI)
-  }
   RW_IRAM1 0x20000000 0x00020000  {  ; RW data
    .ANY (+RW +ZI)
   }
-  RW_IRAM2 0x24000000 0x0004C000  {  ; AXI SRAM: DMA 可见
-   vofa_send.o (+RW +ZI)             ; VOFA 发送缓冲 (UART TX DMA 读)
-   uart_idle.o (+RW +ZI)             ; 串口 RX DMA 缓冲 (dbus/debug/hi229)
+  RW_IRAM2 0x24000000 0x00050000  {
    .ANY (+RW +ZI)
   }
 }

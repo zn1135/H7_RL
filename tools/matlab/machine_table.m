@@ -6,6 +6,7 @@ function m = machine_table(name)
 switch name
     case 'small_wheelleg'   % ---------- 小轮腿 M2006/J4310 = machine_config.c [MACHINE_ID_SMALL_WHEELLEG] ----------
         m.name = 'small_wheelleg';  m.c_id = 'MACHINE_ID_SMALL_WHEELLEG';
+        m.suffix = 'small';
         % 机体 (Leg2 WBR_modeling.mlx 生效组, 板上现表就是这组生成的)
         m.body.g          = 9.81;
         m.body.wheel_r    = 0.04;           % 驱动轮半径 [m]          = .wheel_r
@@ -48,42 +49,45 @@ switch name
             'leg.data_newton15', '待实测 (阶段 2 前作者定)';
             'ctrl.*',            'machine_config.c / lqr_balance.h' };
 
-    case 'big_wheelleg'   % ---------- 大轮腿 = machine_config.c [MACHINE_ID_BIG_WHEELLEG]; 机体全是旧脚本值, 只作预研 ----------
-        m.name = 'big_wheelleg';  m.c_id = 'MACHINE_ID_BIG_WHEELLEG';
-        m.body.g          = 9.81;
-        m.body.wheel_r    = 0.04;                     % 板上占位 (旧脚本 0.06) — 待实测
-        m.body.half_track = 0.221;
-        m.body.l_c        = sqrt(0.015^2 + 0.01^2);   % 旧脚本 x_c=-0.015, z_c=0.01
-        m.body.m_w = 0.3;  m.body.m_l = 2.0;  m.body.m_b = 20.0;
-        m.body.I_w = 0.008;  m.body.I_b = 0.5 + 20.0 * 0.015^2;  m.body.I_z = 0.7;
-        m.leg.lu = 0.21;  m.leg.lg = 0.25;
-        m.leg.len_min = 0.14;  m.leg.len_max = 0.34;
-        % newton15 格式 [l lw_y lb_y delta Ileg] (旧脚本 9 点, lw_y + lb_y = l 逐点成立); sjtu5 格式由它换算
-        D = [
-            0.11, 0.09, 0.02, -0.066, 0.021;
-            0.13, 0.10, 0.03, -0.067, 0.022;
-            0.15, 0.11, 0.04, -0.067, 0.023;
-            0.18, 0.12, 0.06, -0.066, 0.025;
-            0.21, 0.13, 0.08, -0.064, 0.026;
-            0.24, 0.15, 0.09, -0.062, 0.029;
-            0.27, 0.16, 0.11, -0.059, 0.031;
-            0.30, 0.18, 0.12, -0.055, 0.034;
-            0.33, 0.20, 0.13, -0.051, 0.036 ];
-        m.leg.data_newton15 = D;
-        m.leg.data_sjtu5 = [D(:, 1), sqrt(D(:, 2).^2 + D(:, 4).^2), sqrt(D(:, 3).^2 + D(:, 4).^2), D(:, 5)];
-        m.leg.row_mode = 'interp';                    % 表只有 9 点, 网格 1 cm, 只能插值
-        m.ctrl.Ts          = 0.001;
-        m.ctrl.T_wheel_max = 4.8;  m.ctrl.T_hip_max = 20.0;
-        m.ctrl.grid        = 0.14:0.01:0.33;          % 待定: 板上 LQR_K_LEN_MIN/MAX 现为小机器的 0.13/0.23
+    case 'big_wheelleg'
+        m.name = 'big_wheelleg'; m.c_id = 'MACHINE_ID_BIG_WHEELLEG';
+        m.suffix = 'big';
+        % Leg3 s03 同机参数，轮径已由作者确认。
+        m.body.g = 9.81;
+        m.body.wheel_r = 0.0525;
+        m.body.half_track = 0.212755;
+        m.body.l_c = 0.01863;
+        m.body.m_w = 0.65; m.body.m_l = 1.408; m.body.m_b = 20.534;
+        m.body.I_w = 0.000785;
+        m.body.I_b = 0.470224494; m.body.I_z = 0.49037341;
+        m.leg.lu = 0.21; m.leg.lg = 0.25;
+        m.leg.len_min = 0.14; m.leg.len_max = 0.34;
+        addpath(fullfile(fileparts(mfilename('fullpath')), 'reference'));
+        D = leg3_leg_data();
+        Icom = D(:,4) - m.body.m_l .* D(:,3).^2;
+        accepted = Icom > 0;
+        fprintf('Leg3 腿表: %d/%d 行惯量转换有效; 候选域限于 0.15~0.31 m\n', nnz(accepted), size(D,1));
+        D = D(accepted,:); Icom = Icom(accepted);
+        lb = D(:,3) .* cos(D(:,2));
+        m.leg.data_sjtu5 = [D(:,1), D(:,1)-lb, lb, Icom];
+        m.leg.data_newton15 = [];
+        m.leg.row_mode = 'interp';
+        m.ctrl.Ts = 0.002;
+        m.ctrl.T_wheel_max = (0.30*20)*(15.5/19.2);
+        m.ctrl.T_hip_max = 54.0;
+        m.ctrl.grid = 0.15:0.01:0.31;
         m.status = {
-            'body.*',            '待实测 (旧脚本 leg_param.m)';
-            'leg.lu/lg/len_*',   'machine_config.c';
-            'leg.data_newton15', '待实测 (旧脚本 9 点)';
-            'ctrl.grid',         '待实测 (区间实测后定)' };
+            'body.*', 'Leg3 同机 s03 / 轮径作者确认';
+            'leg.data_sjtu5', 'Leg3 质心轴向投影及平行轴换算';
+            'leg.data_newton15', '待实测 (后续模型)';
+            'ctrl.*', 'machine_config / 待台架';
+            'leg.table_tail', '待实测 (0.32~0.34 m 惯量不满足平行轴条件)' };
 
     otherwise
         error('machine_table:unknown', '未知机器 "%s" (small_wheelleg / big_wheelleg)', name);
 end
+
+m.ctrl.state_schema = 'hip';
 
 % 自检 + 待实测清单
 g = m.ctrl.grid;  D = m.leg.data_sjtu5;
@@ -93,7 +97,7 @@ assert(g(1) >= D(1, 1) - 1e-9 && g(end) <= D(end, 1) + 1e-9, ...
     'grid [%.3f %.3f] 超出腿数据覆盖 [%.3f %.3f]', g(1), g(end), D(1, 1), D(end, 1));
 m.pending = {};
 for k = 1:size(m.status, 1)
-    if contains(m.status{k, 2}, '待实测')
+    if contains(m.status{k, 2}, '待实测') && ~strcmp(m.status{k,1}, 'leg.data_newton15')
         m.pending{end + 1} = sprintf('%s(%s)', m.status{k, 1}, m.status{k, 2}); %#ok<AGROW>
     end
 end

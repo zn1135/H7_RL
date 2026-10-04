@@ -5,16 +5,30 @@
 #include <math.h>
 #include <string.h>
 
+/* 一阶低通系数 */
+#define LQR_LPF_ALPHA       0.3f
+/* 速度卡尔曼: 同 Leg2_v1 Body.h (P0 / Q / R / P 上限) */
+#define LQR_KF_P0           0.1f
+#define LQR_KF_Q            0.007f
+#define LQR_KF_R            0.01f
+#define LQR_KF_P_MAX        0.5f
 #define LQR_GRAVITY         9.81f
+/* 腿长变化超此阈值才重算增益 (m) */
 #define LQR_K_RECALC_THRESH 0.0005f
+
+/* 站立目标 */
+#define LQR_POS_TARGET      (0.10f)
+#define LQR_LEG_ANG_TARGET  (0.04f)
+#define LQR_LEG_LEN_INIT    0.14f    /* 投入腿长目标 */
+
 
 /*
  * IMU 轴索引 — 台架第一步必须确认
  * 手法: 手把机头缓慢抬起/压下, 看 pitch 与角速度哪个分量响应最大、符号是否符合
  * 若 pitch 实际落在滚转槽, 只改这两行
  */
-#define LQR_IMU_PITCH_IDX    ATTITUDE_ROLL
-#define LQR_IMU_ROLL_IDX     ATTITUDE_PITCH
+#define LQR_IMU_PITCH_IDX    ATTITUDE_PITCH
+#define LQR_IMU_ROLL_IDX     ATTITUDE_ROLL
 #define LQR_IMU_YAW_IDX      ATTITUDE_YAW
 #define LQR_IMU_GYRO_PITCH   1u
 #define LQR_IMU_GYRO_YAW     2u
@@ -34,8 +48,8 @@ static void LQR_Len_Range(float *len_min, float *len_max)
 {
     *len_min = machine->leg_len_min;
     *len_max = machine->leg_len_max;
-    *len_min = fmaxf(*len_min, LQR_Gain_Info()->len_min);
-    *len_max = fminf(*len_max, LQR_Gain_Info()->len_max);
+    *len_min = fmaxf(*len_min, LQR_K_LEN_MIN);
+    *len_max = fminf(*len_max, LQR_K_LEN_MAX);
 }
 
 /* 初始化 */
@@ -43,27 +57,26 @@ void LQR_Init(lqr_state_t *st)
 {
     memset(st, 0, sizeof(*st));
     lqr_debug.vel_leg_comp_sign = -1.0f;
-    lqr_debug.legacy_gain = 0u;
-    lqr_debug.vel_src = machine->lqr.vel_src;
-    lqr_debug.yaw_hold = machine->lqr.yaw_hold;
-    lqr_debug.yaw_rate_hold = machine->lqr.yaw_rate_hold;
-    lqr_debug.pos_hold = machine->lqr.pos_hold;
-    lqr_debug.vel_ramp = machine->lqr.vel_ramp;
+    lqr_debug.vel_src = 1u;
+    lqr_debug.yaw_hold = 1u;
+    lqr_debug.yaw_rate_hold = 1u;
+    lqr_debug.pos_hold = 1u;
+    lqr_debug.vel_ramp = 5.0f;      /* 同 Leg2 RAMP_VEL_RATE */
     lqr_debug.acc_fwd_sign = 1.0f;
     lqr_debug.pitch_comp_sign = -1.0f;  /* 现行公式 */
-    lqr_debug.pos_arm_vel = machine->lqr.pos_arm_vel;
-    lqr_debug.wheel_enable = machine->lqr.wheel_enable;
-    lqr_debug.hip_enable = machine->lqr.hip_enable;
-    lqr_debug.len_pid_enable = machine->lqr.len_pid_enable;
+    lqr_debug.pos_arm_vel = 0.0f;
+    lqr_debug.wheel_enable = 1u;
+    lqr_debug.hip_enable = 1u;
+    lqr_debug.len_pid_enable = 1u;
     lqr_debug.trq_max_wheel = machine->dji_trq_clamp;
     lqr_debug.trq_max_hip = machine->dm_trq_clamp;
     st->len_eval[0] = -1.0f;
     st->len_eval[1] = -1.0f;
-    Lowpass_Init(&st->lpf_vel, machine->lqr.lpf_alpha[0]);
-    Lowpass_Init(&st->lpf_omg_pitch, machine->lqr.lpf_alpha[1]);
-    Lowpass_Init(&st->lpf_omg_yaw, machine->lqr.lpf_alpha[2]);
-    Kalman_Accel_Init(&st->kf_vel, 0.0f, machine->lqr.kf_p0, machine->lqr.kf_q,
-                      machine->lqr.kf_r, machine->lqr.kf_p_max);
+    Lowpass_Init(&st->lpf_vel, LQR_LPF_ALPHA);
+    Lowpass_Init(&st->lpf_omg_pitch, LQR_LPF_ALPHA);
+    Lowpass_Init(&st->lpf_omg_yaw, LQR_LPF_ALPHA);
+    Kalman_Accel_Init(&st->kf_vel, 0.0f, LQR_KF_P0, LQR_KF_Q, LQR_KF_R,
+                      LQR_KF_P_MAX);
 }
 
 /* 前向加速度: 四元数把机体加速度转到世界系, 去重力, 投影到车头水平方向 */
@@ -113,8 +126,8 @@ uint8_t LQR_Enable_Latch(lqr_state_t *st, const leg_state_t *leg_l,
 {
     (void)leg_l;
     (void)leg_r;
-    st->leg_len_tgt[0] = machine->lqr.leg_len_init[0];
-    st->leg_len_tgt[1] = machine->lqr.leg_len_init[1];
+    st->leg_len_tgt[0] = LQR_LEG_LEN_INIT;
+    st->leg_len_tgt[1] = LQR_LEG_LEN_INIT;
     st->yaw_tgt = st->x[LQR_X_PHI];    /* 朝向锁当前 */
     st->vel_tgt = 0.0f;
     /* 只清位移积分; 滤波器每拍都在跑, 已是热态, 不复位 */
@@ -131,18 +144,17 @@ uint8_t LQR_Target_Update(lqr_state_t *st, const rc_command_t *cmd, float dt)
     float len_max;
     uint8_t i;
 
-    if (cmd == NULL || !cmd->online || !isfinite(dt) || dt <= 0.0f
-        || !isfinite(cmd->vel) || !isfinite(cmd->yaw) || !isfinite(cmd->len))
+    if (cmd == NULL || !cmd->online)
     {
         return 0u;
     }
 
     LQR_Len_Range(&len_min, &len_max);
 
-    st->target[LQR_X_S]     = machine->lqr.pos_target;
+    st->target[LQR_X_S]     = LQR_POS_TARGET;
     /* 速度目标斜坡 (同 Leg2): 松杆时目标按 vel_ramp 降到 0, 减速段仍算"有指令"不积位移, 车停稳才开始积 */
     {
-        float vel_cmd = cmd->vel * machine->lqr.vel_max;
+        float vel_cmd = cmd->vel * LQR_RC_VEL_MAX;
         if (lqr_debug.vel_ramp > 0.0f)
         {
             float step = lqr_debug.vel_ramp * dt;
@@ -161,18 +173,18 @@ uint8_t LQR_Target_Update(lqr_state_t *st, const rc_command_t *cmd, float dt)
         st->yaw_tgt = st->x[LQR_X_PHI];
     }
     st->target[LQR_X_PHI]   = st->yaw_tgt;
-    st->target[LQR_X_DPHI]  = -cmd->yaw * machine->lqr.yaw_max;
-    st->target[LQR_X_THL]   = machine->lqr.leg_trim[0];
+    st->target[LQR_X_DPHI]  = -cmd->yaw * LQR_RC_YAW_MAX;
+    st->target[LQR_X_THL]   = LQR_LEG_ANG_TARGET;
     st->target[LQR_X_DTHL]  = 0.0f;
-    st->target[LQR_X_THR]   = machine->lqr.leg_trim[1];
+    st->target[LQR_X_THR]   = LQR_LEG_ANG_TARGET;
     st->target[LQR_X_DTHR]  = 0.0f;
-    st->target[LQR_X_THB]   = machine->lqr.pitch_trim;
+    st->target[LQR_X_THB]   = 0.0f;
     st->target[LQR_X_DTHB]  = 0.0f;
 
     /* 腿长目标: 拨轮按速率积分, 限制在腿长工作区间 */
     for (i = 0u; i < 2u; i++)
     {
-        st->leg_len_tgt[i] += cmd->len * machine->lqr.len_rate * dt;
+        st->leg_len_tgt[i] += cmd->len * LQR_RC_LEN_RATE * dt;
         st->leg_len_tgt[i] = clampf(st->leg_len_tgt[i], len_min, len_max);
     }
     return 1u;
@@ -188,13 +200,7 @@ uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
     float whl[2];
     float vel[2];
 
-    uint8_t i;
-
     st->valid = 0u;
-    if (!isfinite(dt) || dt <= 0.0f)
-    {
-        return 0u;
-    }
     if (imu == NULL || leg_l == NULL || leg_r == NULL || wheel_vel == NULL)
     {
         return 0u;
@@ -204,34 +210,6 @@ uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
         return 0u;
     }
 
-    if (!isfinite(wheel_vel[0]) || !isfinite(wheel_vel[1])
-        || !isfinite(imu->euler_rad[LQR_IMU_PITCH_IDX])
-        || !isfinite(imu->euler_rad[LQR_IMU_ROLL_IDX])
-        || !isfinite(imu->euler_rad[LQR_IMU_YAW_IDX]))
-    {
-        return 0u;
-    }
-    for (i = 0u; i < 3u; i++)
-    {
-        if (!isfinite(imu->gyro_rad_s[i]) || !isfinite(imu->acc_g[i]))
-        {
-            return 0u;
-        }
-    }
-    for (i = 0u; i < 4u; i++)
-    {
-        if (!isfinite(imu->quat[i]))
-        {
-            return 0u;
-        }
-    }
-    if (!isfinite(leg_l->output.virtual_leg_length) || !isfinite(leg_r->output.virtual_leg_length)
-        || !isfinite(leg_l->output.virtual_leg_angle) || !isfinite(leg_r->output.virtual_leg_angle)
-        || !isfinite(leg_l->output.d_virtual_leg_angle) || !isfinite(leg_r->output.d_virtual_leg_angle)
-        || !isfinite(leg_l->output.d_virtual_leg_length) || !isfinite(leg_r->output.d_virtual_leg_length))
-    {
-        return 0u;
-    }
     st->len[0] = leg_l->output.virtual_leg_length;
     st->len[1] = leg_r->output.virtual_leg_length;
 
@@ -240,11 +218,12 @@ uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
                                imu->gyro_rad_s[LQR_IMU_GYRO_PITCH]);
     st->roll = imu->euler_rad[LQR_IMU_ROLL_IDX];
 
-    /* 前摆正，转世界系 */
-    st->x[LQR_X_THL]  = leg_l->output.virtual_leg_angle - pitch;
-    st->x[LQR_X_DTHL] = leg_l->output.d_virtual_leg_angle - omg_pitch;
-    st->x[LQR_X_THR]  = leg_r->output.virtual_leg_angle - pitch;
-    st->x[LQR_X_DTHR] = leg_r->output.d_virtual_leg_angle - omg_pitch;
+    /* 腿摆角/角速度世界系 = 解算输出 + 机体俯仰
+     * 本工程 virtual_leg_angle 前摆为正, 模型 θ_ll 前摆为负, 故取反后再加 pitch */
+    st->x[LQR_X_THL]  = -leg_l->output.virtual_leg_angle + pitch;
+    st->x[LQR_X_DTHL] = -leg_l->output.d_virtual_leg_angle + omg_pitch;
+    st->x[LQR_X_THR]  = -leg_r->output.virtual_leg_angle + pitch;
+    st->x[LQR_X_DTHR] = -leg_r->output.d_virtual_leg_angle + omg_pitch;
     st->x[LQR_X_THB]  = pitch;
     st->x[LQR_X_DTHB] = omg_pitch;
     st->x[LQR_X_PHI]  = imu->euler_rad[LQR_IMU_YAW_IDX];
@@ -263,13 +242,13 @@ uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
 
     /* 机体水平速度: 轮心线速度 + 摆杆摆动 + 摆杆伸缩 */
     vel[0] = whl[0] * machine->wheel_r
-           - leg_l->output.virtual_leg_length * st->x[LQR_X_DTHL]
+           + leg_l->output.virtual_leg_length * st->x[LQR_X_DTHL]
              * cosf(st->x[LQR_X_THL])
-           - leg_l->output.d_virtual_leg_length * sinf(st->x[LQR_X_THL]);
+           + leg_l->output.d_virtual_leg_length * sinf(st->x[LQR_X_THL]);
     vel[1] = whl[1] * machine->wheel_r
-           - leg_r->output.virtual_leg_length * st->x[LQR_X_DTHR]
+           + leg_r->output.virtual_leg_length * st->x[LQR_X_DTHR]
              * cosf(st->x[LQR_X_THR])
-           - leg_r->output.d_virtual_leg_length * sinf(st->x[LQR_X_THR]);
+           + leg_r->output.d_virtual_leg_length * sinf(st->x[LQR_X_THR]);
     /* 速度估计两条并行: 低通 / 卡尔曼 (加速度预测 + 运动学观测), vel_src 选一条进 x[1] */
     st->ds_raw = (vel[0] + vel[1]) * 0.5f;
     st->ds_lpf = Lowpass_Update(&st->lpf_vel, st->ds_raw);
@@ -297,15 +276,6 @@ uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
         }
     }
     st->x[LQR_X_S] = st->pos;
-    {
-        for (i = 0u; i < LQR_X_NUM; i++)
-        {
-            if (!isfinite(st->x[i]))
-            {
-                return 0u;
-            }
-        }
-    }
     st->valid = 1u;
     return 1u;
 }
@@ -321,25 +291,13 @@ void LQR_Control_Update(lqr_state_t *st)
     uint8_t i;
     uint8_t j;
 
-    st->gain_valid = 0u;
-    memset(st->u, 0, sizeof(st->u));
-    if (!st->valid || !LQR_Gain_Compatible()
-        || !isfinite(st->len[0]) || !isfinite(st->len[1]))
-    {
-        return;
-    }
     /* 增益多项式只在生成网格内有效，实测腿长越界时取边界增益。 */
-    len_l = clampf(st->len[0], LQR_Gain_Info()->len_min, LQR_Gain_Info()->len_max);
-    len_r = clampf(st->len[1], LQR_Gain_Info()->len_min, LQR_Gain_Info()->len_max);
+    len_l = clampf(st->len[0], LQR_K_LEN_MIN, LQR_K_LEN_MAX);
+    len_r = clampf(st->len[1], LQR_K_LEN_MIN, LQR_K_LEN_MAX);
     if (fabsf(len_l - st->len_eval[0]) > LQR_K_RECALC_THRESH
-        || fabsf(len_r - st->len_eval[1]) > LQR_K_RECALC_THRESH
-        || st->gain_legacy != lqr_debug.legacy_gain)
+        || fabsf(len_r - st->len_eval[1]) > LQR_K_RECALC_THRESH)
     {
-        if (!LQR_Gain_Eval(len_l, len_r, K_sym, lqr_debug.legacy_gain))
-        {
-            return;
-        }
-        st->gain_legacy = lqr_debug.legacy_gain;
+        LQR_K_WBR(len_l, len_r, K_sym);
         for (i = 0u; i < LQR_U_NUM; i++)
         {
             for (j = 0u; j < LQR_X_NUM; j++)
@@ -353,13 +311,13 @@ void LQR_Control_Update(lqr_state_t *st)
 
     for (i = 0u; i < LQR_U_NUM; i++)
     {
-        sum = LQR_Gain_Info()->u_eq[i];
+        sum = 0.0f;
         for (j = 0u; j < LQR_X_NUM; j++)
         {
             if (j == LQR_X_PHI)
             {
                 term = lqr_debug.yaw_hold
-                     ? st->K[i][j] * LQR_Wrap_Pi(st->target[j] + LQR_Gain_Info()->x_eq[j] - st->x[j])
+                     ? st->K[i][j] * LQR_Wrap_Pi(st->target[j] - st->x[j])
                      : 0.0f;                        /* 关: 偏航角不参与 */
             }
             else if ((j == LQR_X_DPHI && !lqr_debug.yaw_rate_hold)
@@ -369,7 +327,7 @@ void LQR_Control_Update(lqr_state_t *st)
             }
             else
             {
-                term = st->K[i][j] * (st->target[j] + LQR_Gain_Info()->x_eq[j] - st->x[j]);
+                term = st->K[i][j] * (st->target[j] - st->x[j]);
             }
             if (i == LQR_U_WL)
             {
@@ -379,8 +337,7 @@ void LQR_Control_Update(lqr_state_t *st)
         }
         if (!isfinite(sum))
         {
-            memset(st->u, 0, sizeof(st->u));
-            return;
+            sum = 0.0f;
         }
         if (i == LQR_U_WL || i == LQR_U_WR)
         {
@@ -393,5 +350,4 @@ void LQR_Control_Update(lqr_state_t *st)
                               lqr_debug.trq_max_hip);
         }
     }
-    st->gain_valid = 1u;
 }

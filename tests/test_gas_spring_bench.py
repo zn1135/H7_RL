@@ -1,6 +1,7 @@
 """Execute the production arbiter, spring solver and dispatch on a host."""
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -49,6 +50,8 @@ static uint8_t JointUsb_StreamRequested(void) { return 0; }
 static void JointUsb_Compute(torque_output_t *t) { (void)t; usb_calls++; }
 static void JointUsb_ActuationTick(const torque_output_t *t, uint64_t ns, uint8_t ok)
 { (void)t; (void)ns; (void)ok; }
+#define LQR_Gain_Compatible() (machine->lqr_configured)
+#define LQR_Ready() (machine->lqr_configured)
 #define LQR_State_Update(a,b,c,d,e,f) ((void)(a),(void)(b),(void)(c),(void)(d),(void)(e),(void)(f),0)
 #define LQR_Enable_Latch(a,b,c) ((void)(a),(void)(b),(void)(c),1)
 #define Leg_Balance_Reset(a) ((void)(a))
@@ -95,6 +98,7 @@ int main(void)
     gas_spring_only_enabled = 1;
     Robot_Enable_Update(); assert(!robot_state.motor_enabled);
     usb_lock = 0;
+    fixture_machine = machine_table[MACHINE_DEFAULT];
     fixture_machine.dm_trq_clamp = 40;
     fixture_machine.rl.configured = fixture_machine.lqr_configured = 1;
     Leg_Init(&leg_l);
@@ -139,8 +143,93 @@ int main(void)
 """
 
 
+NORMAL_CHECK = r"""
+static void normal_tick(unsigned expected)
+{
+    unsigned i;
+    robot_state.rc_enable=strategy_rc_enable(&rc_command);
+    Robot_Enable_Update();
+    rl_calls=lqr_calls=usb_calls=0;
+    output_task_body();
+    assert(rl_calls==(expected==2) && lqr_calls==(expected==1));
+    assert(!usb_calls);
+    for(i=0;i<4;i++) { assert(fixture_sent_dm[i]==(float)expected); }
+    for(i=0;i<2;i++) { assert(fabsf(fixture_sent_wheel[i]-0.1f*expected)<0.0001f); }
+}
+int main(void)
+{
+    unsigned s1,s2,expected;
+    fixture_machine=machine_table[MACHINE_DEFAULT];
+    assert(!gas_spring_only_enabled);
+    torque_output_enabled=rc_command.online=imu_state.online=1;
+    leg_l.output.valid=leg_r.output.valid=1;
+    lqr_state.valid=action_state.rl_ready=1;
+    for(s1=1;s1<=3;s1++)
+    {
+        for(s2=1;s2<=3;s2++)
+        {
+            rc_command.s1=s1; rc_command.s2=s2;
+            expected=0;
+            if(s2==DR16_SW_MID && s1==DR16_SW_MID && machine->lqr_configured) { expected=1; }
+            if(s2==DR16_SW_MID && s1==DR16_SW_UP && machine->rl.configured) { expected=2; }
+            normal_tick(expected);
+            if(s1==DR16_SW_MID) { assert(ctrl_strategy==CTRL_STRATEGY_LQR); }
+            if(s1==DR16_SW_UP && machine->rl.configured) { assert(ctrl_strategy==CTRL_STRATEGY_RL); }
+            if(s1==DR16_SW_DOWN) { assert(ctrl_strategy==CTRL_STRATEGY_DISABLE); }
+        }
+    }
+    rc_command.s1=DR16_SW_MID; rc_command.s2=DR16_SW_MID;
+    rc_command.online=0; normal_tick(0); rc_command.online=1;
+    ctrl_fault=1; normal_tick(0); ctrl_fault=0;
+    robot_state.fallen=1; normal_tick(0); robot_state.fallen=0;
+    imu_state.online=0; normal_tick(0); imu_state.online=1;
+    leg_r.output.valid=0; normal_tick(0); leg_r.output.valid=1;
+    fixture_machine.lqr_configured=0; normal_tick(0); fixture_machine.lqr_configured=1;
+    if(machine->rl.configured)
+    {
+        rc_command.s1=DR16_SW_UP;
+        action_state.rl_ready=0; normal_tick(0); action_state.rl_ready=1;
+        normal_tick(2);
+    }
+    rc_command.s1=DR16_SW_MID; normal_tick(1);
+    return 0;
+}
+"""
+
 class GasSpringBenchTest(unittest.TestCase):
     def test_real_actuation_and_arbiter(self):
+        self.build_and_run(FIXTURE, CHECK)
+
+    def test_default_rl_lqr_switches_and_output_gates(self):
+        initial = re.search(r"gas_spring_only_enabled\s*=\s*(\d+)u?\s*;",
+                            read("imcalib/task/robot_control.c"))
+        self.assertIsNotNone(initial)
+        self.assertEqual(int(initial.group(1)), 0)
+        fixture = FIXTURE.replace("gas_spring_only_enabled = 1", "gas_spring_only_enabled = 0")
+        fixture = fixture.replace(
+            "#define LQR_Target_Update(a,b,c) ((void)(a),(void)(b),(void)(c),0)",
+            "#define LQR_Target_Update(a,b,c) ((void)(a),(void)(b),(void)(c),1)")
+        fixture = fixture.replace(
+            "#define LQR_Control_Update(a) ((void)(a),++lqr_calls)",
+            "#define LQR_Control_Update(a) ((a)->gain_valid=1,++lqr_calls)")
+        fixture = fixture.replace(
+            "#define Leg_Balance_Compute(a,b,c,d,e,f) ((void)(a),(void)(b),(void)(c),(void)(d),(void)(e),(void)(f),0)",
+            "#define Leg_Balance_Compute(a,b,c,d,e,f) ((void)(a),(void)(b),(void)(c),(void)(d),(void)(e),fixture_output(f,1))")
+        fixture = fixture.replace(
+            "#define RL_Torque_Compute(a,b,c,d,e,f,g) ((void)(a),(void)(b),(void)(c),(void)(d),(void)(e),(void)(f),(void)(g),++rl_calls,0)",
+            "#define RL_Torque_Compute(a,b,c,d,e,f,g) ((void)(a),(void)(b),(void)(c),(void)(d),(void)(e),(void)(f),++rl_calls,fixture_output(g,2))")
+        fixture += r"""
+static uint8_t fixture_output(torque_output_t *t, float value)
+{
+    unsigned i;
+    for (i=0;i<4;i++) { t->dm[i]=value; }
+    t->dji[0]=t->dji[1]=value*0.1f;
+    return 1;
+}
+"""
+        self.build_and_run(fixture, NORMAL_CHECK)
+
+    def build_and_run(self, fixture, check):
         compiler = os.environ.get("CC") or shutil.which("gcc")
         if compiler is None:
             self.skipTest("no native C compiler; set CC to host gcc")
@@ -152,6 +241,7 @@ class GasSpringBenchTest(unittest.TestCase):
         actuation = actuation.replace("volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];", "")
         actuation = actuation.replace("volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];", "")
         content = [headers,
+                   without_includes(read("imcalib/user-lib/machine_config.c")).split("const machine_cfg_t *const machine")[0],
                    production_enum(read("imcalib/user-lib/dm.h"), "dm_motor_idx_t"),
                    "#define DJI_MOTOR_NUM 2\n#define DJI_MOTOR_WHEEL_LFT 0\n#define DJI_MOTOR_WHEEL_RGT 1",
                    without_includes(read("imcalib/Algorithm/torque_output.h")),
@@ -159,8 +249,8 @@ class GasSpringBenchTest(unittest.TestCase):
                    without_includes(read("imcalib/Algorithm/lqr_balance.h")),
                    without_includes(read("imcalib/Algorithm/leg_balance.h")),
                    production_enum(read("imcalib/task/inc/robot_control.h"), "ctrl_strategy_t"),
-                   STUBS, FIXTURE, without_includes(read("imcalib/Algorithm/gas_spring.c")),
-                   actuation, production_function(read("imcalib/task/task_comm.c"), "Robot_Enable_Update"), CHECK]
+                   STUBS, fixture, without_includes(read("imcalib/Algorithm/gas_spring.c")),
+                   actuation, production_function(read("imcalib/task/task_comm.c"), "Robot_Enable_Update"), check]
         with tempfile.TemporaryDirectory(prefix="gas-bench-") as temporary:
             folder = Path(temporary)
             (folder / "arm_math.h").write_text(ARM_MATH_SHIM, encoding="utf-8")
