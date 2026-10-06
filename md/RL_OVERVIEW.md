@@ -27,7 +27,7 @@
 2. **板端**（STM32H723 + CubeAI）实时推理，输出 6 维动作
 3. **执行层**把动作经 PD + 雅可比映射为 6 个电机力矩
 
-整个链路在 actuationTask 控制环里跑（频率随机器：当前 `MACHINE_DEFAULT` 是大机，500 Hz 与训练 PD 内环同频；小机 1 kHz。见 `machine_config.h` 的 `MACHINE_TIM6_PERIOD` / `MACHINE_CTRL_DT`，变更 96 / 100），RL 推理 100 Hz（policyTask 由同一 TIM6 节拍按 `MACHINE_POLICY_DIV` 分频唤醒：大机 5 分频、小机 10 分频，严格锁相，变更 103；执行任务每拍复用最新动作）。
+actuationTask 基础节拍为 1 kHz，LQR 每拍估计/求解/下发；大机器 RL 力矩/PD 和正常下发每两拍一次（500 Hz），间隔拍保留上次输出、不插入零力矩。RL 网络推理仍由 TIM6 十分频以 100 Hz 唤醒，每次 RL 执行复用最新动作。`MACHINE_TICK_DT/MACHINE_LQR_DT`、`MACHINE_RL_CTRL_DIV/MACHINE_RL_CTRL_DT`、`MACHINE_POLICY_DIV/MACHINE_POLICY_DT` 分别定义三个节拍；退出或故障在每个基础拍优先停止输出。小机器 RL 仍未配置，保留原执行分频定义。
 
 **数据流一句话**：
 ```
@@ -73,7 +73,7 @@ IMU(四元数+陀螺仪) + 电机编码器(关节角) + DJI轮速 + 遥控指令
 
 | 任务 | 频率 | 节拍方式 | 职责 |
 |------|------|----------|------|
-| `actuationTask` | 小机 1kHz / 大机 500Hz | TIM6 信号量（硬实时） | 策略仲裁（LQR / RL）→ 力矩计算 → CAN 下发 |
+| `actuationTask` | 基础/LQR 1kHz；大机 RL 执行500Hz | TIM6 信号量 | 每拍仲裁与停机；按策略分频求解/下发 |
 | `policyTask` | 100Hz | TIM6 节拍 `MACHINE_POLICY_DIV` 分频信号量（变更 103） | 观测构建 → CubeAI 推理 → 写 action_state |
 | `imuTask` | 1kHz | osDelay(1ms) | HI229 新帧解析 → 姿态更新 → 写 imu_state |
 | `commTask` | 1kHz | osDelay | DM/DJI/DR16 解析 → 状态更新 → 在线检测 → 故障位 → VOFA（普通帧与策略追踪同口互斥） |
@@ -87,7 +87,7 @@ IMU(四元数+陀螺仪) + 电机编码器(关节角) + DJI轮速 + 遥控指令
 ```
 [ISR] FDCAN → dm/dji raw_pending
 [ISR] UART  → hi229_rx.flag / dbus_rx.flag
-[ISR] TIM6  → ctrl_tick_sem (控制环信号量, 小机 1kHz / 大机 500Hz)
+[ISR] TIM6  → ctrl_tick_sem (基础控制拍，两机均1kHz)
 
 imuTask     → imu_state {quat, eul, gyr, acc, online}
 commTask    → motor_state/leg_state; ctrl_fault; VOFA
@@ -165,7 +165,7 @@ DM 反馈层已对右侧电机取反（`feedback_sign`），力矩下发按 `out
 
 ```
 1. 动作 (固件关节空间; task_policy 把训练动作乘 .rl.sign 得到)
-2. PD 控制 (actuationTask 控制环; 大机 500 Hz 同训练内环):
+2. PD 控制 (actuationTask 中 RL 执行分频; 大机 500 Hz 同训练内环):
    腿关节(4维): 目标 = act × 0.5 + dof_pos, dof_pos = zero + sign × 训练默认角 (RL_Torque_Param_Init 按机器表算)
                 tau_v = Kp × wrap(目标 − q) − Kd × q̇   (D 项用关节速度, 同仿真 PD; 不再用 pid 的 Δe 微分)
    轮子(2维):   目标速度 = act × 10; tau_v = Kp_w × (目标 − 轮速)
@@ -207,7 +207,7 @@ PID 参数按模型存表，具体数值以 `RL_Torque_Param_Init()` 为准。�
 | 步骤 | 内容 |
 |------|------|
 | 投入判定 | 读 `output_task_rl_engaged()`：左拨杆上 + 右拨杆中 + 电机使能 + 遥控在线（拨杆语义仍只在 `task_actuation.c`）。未投入：清历史、发零动作、`rl_ready=0`；观测仍照算一份预览供 VOFA（不进历史，变更 99） |
-| 指令 | 前进与偏航按右摇杆及 `RL_CMD_*` 量程映射。投入 RL 且遥控在线时，拨轮按速率累加机身高度目标，回中保持当前值，越界钳位；退出投入或离线恢复初始值。按机器控制周期×策略分频数积分。目标经观测缩放送入网络，不是直接腿长 PID。 |
+| 指令 | 前进与偏航按右摇杆及 `RL_CMD_*` 量程映射。投入 RL 且遥控在线时，拨轮按速率累加机身高度目标，回中保持当前值，越界钳位；退出投入或离线恢复初始值。按 MACHINE_POLICY_DT 积分。目标经观测缩放送入网络，不是直接腿长 PID。 |
 | 观测 | `RL_Control_Update_Observation()`：源无效或 `.rl` 未配置 → 从头预热、零动作 |
 | 预热 | 投入后前 `RL_WARMUP_STEPS`（10 步 = 0.1 s）发零动作（此间 `rl_ready=1` 但动作为零），PD 与历史照跑。训练是"首次任一轮接触力 > 1 N 后的下一策略步才推理"，实机轮本来就在地上，只留短预热 |
 | 推理 | `RL_Policy_Run()` → 训练动作 → 裁剪 `RL_ACTION_CLIP` = 100（训练 clip_actions）→ 存 last_action（训练 obs 里也是 clip 后的动作）→ 乘 `.rl.sign` 变固件动作 → 发布，`rl_ready=1` |
@@ -390,7 +390,7 @@ Leg_Solve 当前已完成以下验证：
 | 观测 | 25 维同 §3.2；`dof_vel` 训练用 500 Hz 位置差分，固件用电机反馈速度（噪声与延迟特性不同，待观察） | 已填 |
 | PD | Kp 10 / Kd 1.0（腿），轮 Kd 0.1；`τ = Kp(目标 − q) + Kd(目标速度 − q̇)`；虚拟关节力矩上限 40 / 40 / 3.9 | 已填（变更 97） |
 | 动作 | 腿 ×0.5 + 默认角，轮 ×10；clip_actions 100；obs 里的 last_action 是 clip 后的动作 | 已填 |
-| 指令 | 前进与偏航按右摇杆及 `RL_CMD_*` 量程映射。投入 RL 且遥控在线时，拨轮按速率累加机身高度目标，回中保持当前值，越界钳位；退出投入或离线恢复初始值。按机器控制周期×策略分频数积分。目标经观测缩放送入网络，不是直接腿长 PID。 |
+| 指令 | 前进与偏航按右摇杆及 `RL_CMD_*` 量程映射。投入 RL 且遥控在线时，拨轮按速率累加机身高度目标，回中保持当前值，越界钳位；退出投入或离线恢复初始值。按 MACHINE_POLICY_DT 积分。目标经观测缩放送入网络，不是直接腿长 PID。 |
 | 起立接管 | 初态 0.15 m 地面后摆，lf0 = ±11 rad（Isaac 不 wrap；sim2sim 回放 wrap 到 ±π 即 −1.566）；首次任一轮接触力 > 1 N 后的下一策略步才推理，之前零动作 + PD | 预热 10 步；固件角度 wrap ±π 与 sim2sim 一致；起立本身以训练侧 sim2sim 结果为准，先测站立 |
 | 坐标 | URDF 机体系，z 上；重力投影 = quat_rotate_inverse(q, [0,0,−1])；角速度机体系 | 与固件一致，前提是下面的 x 方向判定 |
 

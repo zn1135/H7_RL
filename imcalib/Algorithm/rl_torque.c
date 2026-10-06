@@ -176,14 +176,14 @@ uint8_t RL_Torque_Compute(const leg_state_t *leg_l, const leg_state_t *leg_r,
         {
             state->pos_target[i] = vel_ref[i];
             tau_v[i] = pid_calc(&state->controller[i], qd[i], vel_ref[i],
-                CTRL_DT);
+                MACHINE_RL_CTRL_DT);
         }
         else
         {
             float target = pos_ref[i] + param->dof_pos[i];
             state->pos_target[i] = target;
             tau_v[i] = pid_calc(&state->controller[i], q[i], target,
-                CTRL_DT) - param->d_gains[i] * qd[i];
+                MACHINE_RL_CTRL_DT) - param->d_gains[i] * qd[i];
         }
     }
     /* 机器力矩上限 */

@@ -9,6 +9,7 @@
 void Leg_Balance_Init(leg_balance_t *lb)
 {
     memset(lb, 0, sizeof(*lb));
+    lb->len_prime_enable = 1u;
 
     PID_struct_init(&lb->leg_len[0], POSITION_PID, machine->lqr.leg_len[0].max_output,
                     machine->lqr.leg_len[0].integral_limit, machine->lqr.leg_len[0].kp,
@@ -48,6 +49,22 @@ void Leg_Balance_Reset(leg_balance_t *lb)
     memset(lb->F, 0, sizeof(lb->F));
     memset(lb->Tp, 0, sizeof(lb->Tp));
     memset(&lb->cmd, 0, sizeof(lb->cmd));
+    lb->len_history_ready = 0u;
+}
+
+/* 预置腿长历史 */
+static void Leg_Balance_Prime_Length(pid_t *pid, float measured, float target)
+{
+    float error;
+    uint8_t i;
+
+    error = target - measured;
+    for (i = 0u; i < 3u; i++)
+    {
+        pid->get[i] = measured;
+        pid->set[i] = target;
+        pid->err[i] = error;
+    }
 }
 
 /* 力域映射 + 限幅: (足端力, 髋扭矩) → 前后髋电机力矩 (虚功原理), 轮扭矩直接限幅 */
@@ -105,6 +122,8 @@ uint8_t Leg_Balance_Compute(leg_balance_t *lb, const lqr_state_t *st,
     float Tp[2];
     float F[2];
     float wheel[2];
+    float length[2];
+    float target[2];
 
     if (lb == NULL || st == NULL || leg_l == NULL || leg_r == NULL
         || torque == NULL)
@@ -116,11 +135,27 @@ uint8_t Leg_Balance_Compute(leg_balance_t *lb, const lqr_state_t *st,
         return 0u;
     }
 
+    length[0] = leg_l->output.virtual_leg_length;
+    length[1] = leg_r->output.virtual_leg_length;
+    target[0] = st->leg_len_tgt[0];
+    target[1] = st->leg_len_tgt[1];
+
+    /* 首拍消除突变 */
+    if (lb->len_prime_enable && !lb->len_history_ready)
+    {
+        if (!isfinite(length[0]) || !isfinite(length[1])
+            || !isfinite(target[0]) || !isfinite(target[1]))
+        {
+            return 0u;
+        }
+        Leg_Balance_Prime_Length(&lb->leg_len[0], length[0], target[0]);
+        Leg_Balance_Prime_Length(&lb->leg_len[1], length[1], target[1]);
+        lb->len_history_ready = 1u;
+    }
+
     /* 1. 辅助 PID */
-    (void)pid_calc(&lb->leg_len[0], leg_l->output.virtual_leg_length,
-                   st->leg_len_tgt[0], dt);
-    (void)pid_calc(&lb->leg_len[1], leg_r->output.virtual_leg_length,
-                   st->leg_len_tgt[1], dt);
+    (void)pid_calc(&lb->leg_len[0], length[0], target[0], dt);
+    (void)pid_calc(&lb->leg_len[1], length[1], target[1], dt);
     (void)pid_calc(&lb->roll, st->roll, 0.0f, dt);
 
     /* 模型力矩转力域 */

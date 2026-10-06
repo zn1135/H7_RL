@@ -140,7 +140,7 @@ static void RL_Command_From_Rc(float command[3])
     float height_min = RL_CMD_HEIGHT_MIN;
     float height_max = RL_CMD_HEIGHT_MAX;
     float height = input_command.height_cmd;
-    float policy_dt = MACHINE_CTRL_DT * (float)MACHINE_POLICY_DIV;
+    float policy_dt = MACHINE_POLICY_DT;
 
     if (height < height_min || height > height_max)
     {

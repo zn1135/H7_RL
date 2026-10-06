@@ -18,16 +18,20 @@
 #endif
 
 #if MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
-#define MACHINE_TIM6_PERIOD       1999u   /* 500 Hz */
-#define MACHINE_CTRL_DT           0.002f
-#define MACHINE_POLICY_DIV        5u      /* 策略节拍 500/5 = 100 Hz */
+#define MACHINE_TIM6_PERIOD       999u    /* 1 kHz */
+#define MACHINE_TICK_DT           0.001f
+#define MACHINE_RL_CTRL_DIV       2u      /* 500 Hz */
+#define MACHINE_DM_OFFLINE_MS     50u
+#define MACHINE_POLICY_DIV        10u     /* 100 Hz */
 #define MACHINE_VOFA_PORT         8u      /* UART8 */
 #define MACHINE_FDCAN13_DATA_PRESCALER  1u
 #define MACHINE_FDCAN13_DATA_SEG1       4u
 #define MACHINE_FDCAN13_DATA_SEG2       1u
 #elif MACHINE_DEFAULT == MACHINE_ID_SMALL_WHEELLEG
 #define MACHINE_TIM6_PERIOD       999u    /* 1 kHz */
-#define MACHINE_CTRL_DT           0.001f
+#define MACHINE_TICK_DT           0.001f
+#define MACHINE_RL_CTRL_DIV       1u      /* 小机兼容 */
+#define MACHINE_DM_OFFLINE_MS     10u
 #define MACHINE_POLICY_DIV        10u     /* 策略节拍 1000/10 = 100 Hz */
 #define MACHINE_VOFA_PORT         8u      /* UART8 */
 #define MACHINE_FDCAN13_DATA_PRESCALER  3u
@@ -36,6 +40,11 @@
 #else
 #error "Unsupported MACHINE_DEFAULT"
 #endif
+
+#define MACHINE_CTRL_DT           MACHINE_TICK_DT
+#define MACHINE_LQR_DT            MACHINE_TICK_DT
+#define MACHINE_RL_CTRL_DT        (MACHINE_TICK_DT * (float)MACHINE_RL_CTRL_DIV)
+#define MACHINE_POLICY_DT         (MACHINE_TICK_DT * (float)MACHINE_POLICY_DIV)
 
 /* 一路电机的极性 */
 typedef struct {

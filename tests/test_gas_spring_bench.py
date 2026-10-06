@@ -22,6 +22,9 @@ static rc_command_t rc_command;
 static struct { uint8_t rc_enable, motor_enabled, fallen; } robot_state;
 static uint32_t ctrl_fault;
 #define FAULT_NONE 0
+#define Robot_Control_Vofa_Diag_Update(request) ((void)(request))
+#define taskENTER_CRITICAL() ((void)0)
+#define taskEXIT_CRITICAL() ((void)0)
 static struct { struct { float vel_rad_s[2]; } dji; } motor_state;
 static imu_state_t imu_state;
 static struct { uint8_t rl_ready; float a[6]; } action_state;
@@ -196,6 +199,89 @@ int main(void)
 }
 """
 
+CADENCE_CHECK = r"""
+static void step(void)
+{
+    fixture_ns += 1000000;
+    Policy_Tick_Div();
+    output_task_body();
+}
+static void assert_zero(void)
+{
+    unsigned i;
+    for(i=0;i<4;i++) { assert(fixture_sent_dm[i]==0); }
+    for(i=0;i<2;i++) { assert(fixture_sent_wheel[i]==0); }
+}
+int main(void)
+{
+    unsigned i, compute_before, sends_before, expected, fault_case;
+    fixture_machine=machine_table[MACHINE_DEFAULT];
+    fixture_machine.rl.configured=1;
+    assert(MACHINE_TICK_DT==0.001f && MACHINE_LQR_DT==0.001f);
+    assert(fabsf(MACHINE_POLICY_DT-0.01f)<1e-7f);
+    assert(MACHINE_POLICY_DIV==10);
+    assert(MACHINE_RL_CTRL_DIV==(MACHINE_DEFAULT==0?2u:1u));
+    assert(fabsf(MACHINE_RL_CTRL_DT-(MACHINE_DEFAULT==0?0.002f:0.001f))<1e-7f);
+    robot_state.rc_enable=robot_state.motor_enabled=rc_command.online=1;
+    torque_output_enabled=imu_state.online=action_state.rl_ready=1;
+    leg_l.output.valid=leg_r.output.valid=lqr_state.valid=1;
+    rc_command.s1=rc_command.s2=DR16_SW_MID;
+    Robot_Enable_Update();
+    for(i=0;i<100;i++)
+    {
+        compute_before=lqr_calls; sends_before=fixture_dm_transmits;
+        step(); assert(lqr_calls==compute_before+1 && fixture_dm_transmits==sends_before+1);
+        if(i) { assert(control_time_debug.period_us==1000 && control_time_debug.output_period_us==1000); }
+    }
+    assert(policy_releases==10 && control_time_debug.sequence==100);
+    rc_command.s1=DR16_SW_UP;
+    for(i=0;i<100;i++)
+    {
+        expected=(i%MACHINE_RL_CTRL_DIV)==0;
+        compute_before=rl_calls; sends_before=fixture_dm_transmits;
+        step();
+        assert(rl_calls==compute_before+expected && fixture_dm_transmits==sends_before+expected);
+        assert(fixture_sent_dm[0]==2 && fixture_sent_wheel[0]==0.2f);
+        if(expected && i) { assert(control_time_debug.output_period_us==1000*MACHINE_RL_CTRL_DIV); }
+    }
+    assert(policy_releases==20);
+    for(fault_case=0;fault_case<9;fault_case++)
+    {
+        rc_command.s1=DR16_SW_MID; step();
+        rc_command.s1=DR16_SW_UP; step();
+        compute_before=rl_calls; sends_before=fixture_dm_transmits;
+        switch(fault_case)
+        {
+        case 0: ctrl_fault=4; break;
+        case 1: robot_state.fallen=1; break;
+        case 2: robot_state.motor_enabled=0; break;
+        case 3: action_state.rl_ready=0; break;
+        case 4: leg_r.output.valid=0; break;
+        case 5: rc_command.s2=DR16_SW_UP; break;
+        case 6: rc_command.online=0; break;
+        case 7: torque_output_enabled=0; break;
+        default: robot_state.rc_enable=0; break;
+        }
+        step(); assert(rl_calls==compute_before && fixture_dm_transmits==sends_before+1); assert_zero();
+        ctrl_fault=robot_state.fallen=0;
+        robot_state.rc_enable=robot_state.motor_enabled=action_state.rl_ready=1;
+        leg_r.output.valid=rc_command.online=torque_output_enabled=1;
+        rc_command.s2=DR16_SW_MID;
+        step(); assert(rl_calls==compute_before+1 && fixture_sent_dm[0]==2);
+    }
+    rc_command.s1=DR16_SW_MID; step();
+    rc_command.s1=DR16_SW_UP; fixture_fail_output=1;
+    sends_before=fixture_dm_transmits; compute_before=rl_calls;
+    step(); assert_zero(); step(); assert_zero();
+    assert(rl_calls==compute_before+2 && fixture_dm_transmits==sends_before+2);
+    fixture_fail_output=0; step(); assert(fixture_sent_dm[0]==2);
+    rc_command.s1=DR16_SW_MID; sends_before=fixture_dm_transmits;
+    step(); assert(fixture_sent_dm[0]==1 && fixture_dm_transmits==sends_before+1);
+    assert(control_time_debug.period_us==1000);
+    return 0;
+}
+"""
+
 class GasSpringBenchTest(unittest.TestCase):
     def test_real_actuation_and_arbiter(self):
         self.build_and_run(FIXTURE, CHECK)
@@ -205,6 +291,17 @@ class GasSpringBenchTest(unittest.TestCase):
                             read("imcalib/task/robot_control.c"))
         self.assertIsNotNone(initial)
         self.assertEqual(int(initial.group(1)), 0)
+        self.build_and_run(self.normal_fixture(), NORMAL_CHECK)
+
+    def test_strategy_cadence_and_stop_on_skipped_rl_tick(self):
+        fixture = self.normal_fixture()
+        fixture = fixture.replace("static uint64_t Mono_Ns_Get(void) { return 1; }",
+            "static uint64_t fixture_ns;\nstatic uint64_t Mono_Ns_Get(void) { return fixture_ns; }")
+        fixture = fixture.replace("static uint8_t fixture_output(torque_output_t *t, float value)\n{\n    unsigned i;",
+            "static uint8_t fixture_fail_output;\nstatic uint8_t fixture_output(torque_output_t *t, float value)\n{\n    unsigned i;\n    if(fixture_fail_output && value==2) { return 0; }")
+        self.build_and_run(fixture, CADENCE_CHECK, instrument=True)
+
+    def normal_fixture(self):
         fixture = FIXTURE.replace("gas_spring_only_enabled = 1", "gas_spring_only_enabled = 0")
         fixture = fixture.replace(
             "#define LQR_Target_Update(a,b,c) ((void)(a),(void)(b),(void)(c),0)",
@@ -227,19 +324,30 @@ static uint8_t fixture_output(torque_output_t *t, float value)
     return 1;
 }
 """
-        self.build_and_run(fixture, NORMAL_CHECK)
+        return fixture
 
-    def build_and_run(self, fixture, check):
+    def build_and_run(self, fixture, check, instrument=False):
         compiler = os.environ.get("CC") or shutil.which("gcc")
         if compiler is None:
             self.skipTest("no native C compiler; set CC to host gcc")
         environment = os.environ.copy()
         environment["PATH"] = str(Path(compiler).parent) + os.pathsep + environment.get("PATH", "")
-        headers = HEADERS.replace("int unused; } rc_command_t", "uint8_t online, s1, s2; } rc_command_t")
-        headers = headers.replace("int unused; } imu_state_t", "uint8_t online; } imu_state_t")
+        headers = HEADERS.replace("int unused; } rc_command_t", "uint8_t online, s1, s2; float vel, yaw, len; } rc_command_t")
+        headers = headers.replace("int unused; } imu_state_t", "uint8_t online, pitch_world_valid; float euler_rad[3], gyro_rad_s[3], pitch_world; } imu_state_t")
         actuation = without_includes(read("imcalib/task/task_actuation.c"))
         actuation = actuation.replace("volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];", "")
         actuation = actuation.replace("volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];", "")
+        stubs = STUBS
+        timing = ""
+        if instrument:
+            stubs = "static unsigned fixture_dm_transmits;\n" + stubs.replace(
+                "return fixture_dm_status;", "fixture_dm_transmits++; return fixture_dm_status;")
+            timing = "#define CONTROL_TIME_VOFA_ENABLE 1\n" + re.search(
+                r"typedef struct \{[^}]*\} control_time_debug_t;", read("imcalib/task/inc/robot_control.h")).group()
+            timing += "\nstatic volatile control_time_debug_t control_time_debug;\n"
+            timing += "static unsigned policy_releases; static int policy_tick_sem_handle;\n"
+            timing += "static int osSemaphoreRelease(int h) { (void)h; policy_releases++; return 0; }\n"
+            timing += production_function(read("imcalib/task/robot_control.c"), "Policy_Tick_Div")
         content = [headers,
                    without_includes(read("imcalib/user-lib/machine_config.c")).split("const machine_cfg_t *const machine")[0],
                    production_enum(read("imcalib/user-lib/dm.h"), "dm_motor_idx_t"),
@@ -248,8 +356,10 @@ static uint8_t fixture_output(torque_output_t *t, float value)
                    without_includes(read("imcalib/Algorithm/rl_torque.h")),
                    without_includes(read("imcalib/Algorithm/lqr_balance.h")),
                    without_includes(read("imcalib/Algorithm/leg_balance.h")),
+                   without_includes(read("imcalib/Algorithm/standup.h")),
                    production_enum(read("imcalib/task/inc/robot_control.h"), "ctrl_strategy_t"),
-                   STUBS, fixture, without_includes(read("imcalib/Algorithm/gas_spring.c")),
+                   timing, stubs, fixture, without_includes(read("imcalib/Algorithm/gas_spring.c")),
+                   without_includes(read("imcalib/Algorithm/standup.c")),
                    actuation, production_function(read("imcalib/task/task_comm.c"), "Robot_Enable_Update"), check]
         with tempfile.TemporaryDirectory(prefix="gas-bench-") as temporary:
             folder = Path(temporary)
@@ -264,8 +374,8 @@ static uint8_t fixture_output(torque_output_t *t, float value)
                             "-DLEG_TRIG_LIBM=1", f"-DMACHINE_DEFAULT={machine_id}",
                             f"-DGAS_SPRING_COMP_ENABLE={enabled}", "-I", str(folder),
                             "-I", str(ROOT / "imcalib/Algorithm"), "-I", str(ROOT / "imcalib/user-lib"),
-                            str(source), str(ROOT / "imcalib/Algorithm/leg_solver.c"), "-lm", "-o", str(exe)],
-                            capture_output=True, text=True, env=environment)
+                            str(source), str(ROOT / "imcalib/Algorithm/leg_solver.c"), str(ROOT / "imcalib/user-lib/pid.c"), "-lm", "-o", str(exe)],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment)
                         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                        result = subprocess.run([str(exe)], capture_output=True, text=True, env=environment)
+                        result = subprocess.run([str(exe)], capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment)
                         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

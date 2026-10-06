@@ -73,7 +73,7 @@ uint8_t LQR_Gain_Check(const lqr_gain_desc_t *gain, const machine_cfg_t *cfg,
 
 uint8_t LQR_Gain_Compatible(void)
 {
-    return (uint8_t)(LQR_Gain_Check(selected_gain, machine, Machine_Id(), MACHINE_CTRL_DT) == LQR_GAIN_OK);
+    return (uint8_t)(LQR_Gain_Check(selected_gain, machine, Machine_Id(), MACHINE_LQR_DT) == LQR_GAIN_OK);
 }
 
 uint8_t LQR_Ready(void)

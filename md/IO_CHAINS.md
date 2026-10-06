@@ -40,16 +40,20 @@ task_imu.c: imu_task_body() @ 约 1kHz (imuTask osDelay(1))
       gyro_rad_s[3] 按机体 X/Y/Z 序: gyr_sign[i] × raw.gyr[gyr_src[i]] × DEG2RAD
       acc_g[3]      按机体 X/Y/Z 序: acc_sign[i] × raw.acc[acc_src[i]] (G)
       online        HI229_Online() 且四元数归一化成功
+      pitch_world   Pitch_World_Calc(pitch,quat) → 原 pitch 按重力 Z 补角 [-π,π) rad
+      pitch_world_valid 在线且输入/计算有效; 失败/离线时与 pitch_world 一起清零
     │
     ▼
 消费端:
+  task_comm.c: imu_state.pitch_world / pitch_world_valid → 普通 VOFA ch29/30
+    (另用于自起姿态判断／fallen; 模块在 task/pitch_world.c/h，控制pitch不替换)
   task_policy.c:
     imu_state.online       → 观测有效门控
     imu_state.gyro_rad_s   → obs.gyro
     imu_state.quat         → obs.gravity (RL_Observation_Project_Gravity)
   task_comm.c:
     imu_state.online       → FAULT_IMU
-    imu_state.euler_rad[ATTITUDE_PITCH] → |pitch| 翻倒检测
+    imu_state.pitch_world / pitch_world_valid → 翻倒检测（无效保护）
   lqr_balance.c:
     euler_rad[PITCH/ROLL/YAW], gyro_rad_s[1]/[2] → 俯仰、横滚、偏航角、俯仰/偏航角速度
     quat + acc_g → 前向加速度 (LQR_Accel_Forward, 速度卡尔曼输入)
@@ -143,7 +147,7 @@ motor_state.dm:
 | Dm_Init() | 注册 CAN 回调 |
 | Dm_Read() | 中断存 raw_data |
 | Dm_Parse() | 解码 raw→物理量 |
-| Dm_Is_Online() | 10ms 超时检测 |
+| Dm_Is_Online() | 接收超时由 MACHINE_DM_OFFLINE_MS 按机器配置，当前数值以 machine_config.h 为准 |
 | Dm_Is_Enabled() | `err_raw==1` 使能检测 |
 | Dm_Has_Fault() | `err_raw` 在 `0x8~0xE` 的故障检测 |
 | Dm_Enable_Watchdog() | 总使能期间，在线且失能态的电机每 100ms 重发使能 |
@@ -280,7 +284,7 @@ task_comm.c:
   Robot_Fault_Update():
     !DR16_Online() → FAULT_RC (另有 FAULT_IMU/CAN/MOTOR/ACTION)
   Robot_Fallen_Update():
-    |pitch|>1.4 → fallen=1, <1.0 → 回正
+    世界pitch无效/离线或|pitch_world|>1.4 → fallen=1，有效且<1.0 → 回正
   Robot_Enable_Update():
     enable_request = rc_enable && ctrl_fault==0 && !fallen
     使能沿 → Dm_All_Enable; 失能沿 → Dji_All_Stop + Dm_All_Disable
@@ -398,7 +402,7 @@ robot_state_t robot_state:
                                    || (s1==UP  && machine->rl.configured))
                    (早期文档记 "s1 != DOWN && online", 已按 task_comm.c:74-76 更正)
     fallen       ← Robot_Fallen_Update()
-                   |pitch|>1.4 → 1, <1.0 → 0
+                   世界pitch无效/离线或|pitch_world|>1.4 → 1，有效且<1.0 → 0
     motor_enabled← Robot_Enable_Update()
                    rc_enable && ctrl_fault==0 && !fallen
 

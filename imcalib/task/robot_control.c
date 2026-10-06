@@ -1,5 +1,6 @@
 #include "robot_control.h"
 #include "machine_config.h"
+#include "standup.h"
 
 #include <string.h>
 
@@ -67,6 +68,7 @@ void Robot_Control_Init(void)
         Error_Handler();
     }
     torque_output_enabled = 1u;
+    Standup_Init(&standup_control);
 
     Leg_Init(&leg_l);
     Leg_Init(&leg_r);

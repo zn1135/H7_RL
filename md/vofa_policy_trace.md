@@ -1,11 +1,81 @@
 # VOFA 采集与模式切换
 
-> 2026-10-03 当前普通页已按作者要求改为仅发送 LQR 十维状态，ch0～ch9 与 `lqr_state.x` 同序。下面普通 38 通道布局为历史；策略追踪的 32 通道帧保持原定义。查看普通 LQR 页需 `vofa_trace_requested=0`，详见 [双机 LQR](lqr-dual-machine.md)。
+> 当前普通帧为39通道（ch0～38），用于四髋／FDCAN1中断诊断，已替换原LQR状态页。普通页需 `vofa_trace_requested=0`。下方38通道布局及周期通道覆盖表均为历史；策略追踪32通道帧保持原定义。
 
 
-默认通过 UART8 发送普通 38 通道 JustFloat；USB CDC 留给 JID1。`vofa_transport.requested/active` 的 1 为 UART8、0 为 USB CDC。普通帧是 38 个小端 float32 与 `00 00 80 7F` 帧尾，共 156 字节；策略追踪仍为 32 通道、132 字节。
+默认通过 UART8 发送普通 39 通道 JustFloat；USB CDC 留给 JID1。`vofa_transport.requested/active` 的 1 为 UART8、0 为 USB CDC。普通帧是 39 个小端 float32 与 `00 00 80 7F` 帧尾，共 160 字节；策略追踪仍为 32 通道、132 字节。
 
-## 普通 VOFA（上电默认）
+## 当前四髋／FDCAN1诊断（39通道）
+
+仍在Robot_Control_Send_Vofa发送JustFloat、39通道、160字节；普通页vofa_trace_requested=0。不新增任务／发送入口，不改变控制器、1kHz节拍、离线时间或CAN配置。HAL状态查询只读协议／计数寄存器；硬件读取可能清除部分“自上次读取以来”诊断标志，不清发送队列、不重启总线，也不改现有恢复策略。
+
+| 通道 | 内容 | 单位／说明 |
+|---|---|---|
+| ch0、ch1、ch2 | 在线掩码、使能／投入状态、ctrl_fault | 195=四髋均离线而其他在线；fault4电机、8CAN、12两者 |
+| ch3、ch4 | 自起phase／fault | phase6为先伸腿，phase5为上绕后摆；4／4外部门控中断，4／2超时，4／3准备姿态保护 |
+| ch5、ch6 | 阶段／连续到位计时 | ms |
+| ch7～10 | 四髋反馈年龄 | ms，左前／左后／右前／右后；未收到反馈为−1 |
+| ch11～14 | 四髋err_raw | 同顺序，最后解析值；离线时可能是旧码，并不证明电机没保护 |
+| ch15 | FDCAN1发送FIFO空位 | 当前配置容量32；降至0说明队列满 |
+| ch16、ch17 | CAN发送／接收错误计数TEC、REC | 硬件当前计数 |
+| ch18、ch19 | 最近有效LEC、DLEC | 自上电保留最近1～6错误；0／7不覆盖，详情如下 |
+| ch20 | CAN协议状态位 | 见下方 |
+| ch21～24 | 四髋最近下发命令 | N·m、控制坐标、同顺序；记录入队请求，不证明已上总线或电机收到 |
+| ch25、ch26 | 原pitch、原pitch角速度 | rad、rad/s |
+| ch27、ch28、ch29 | 左右实际腿长、世界pitch | m、m、rad |
+| ch30 | 原控制诊断位 | bit0enabled、1need、2世界pitch有效、3LQR状态有效、4K有效、5LQR投入、6DM最近入队成功、7轮最近入队成功 |
+| ch31、ch32 | FDCAN1收帧累计、最近ID | 累计低24位；包括路由处理前的合法收到帧，不等于每台电机已解析 |
+| ch33、ch34 | HAL FDCAN1 ErrorCode低／高16位 | 完整错误掩码=ch33+65536×ch34，避免float32丢低位 |
+| ch35 | 板端通信周期时间戳 | ms，低24位，约4.66小时回绕 |
+| ch36、ch37 | 左右几何腿角 | rad |
+| ch38 | CAN ErrorLogging硬件计数CEL | 硬件采样值，非软件累积；读取／恢复可清除或变化，不能单独当作总错误次数 |
+
+LEC／DLEC：1填充错误、2格式错误、3ACK错误、4隐性位错误、5显性位错误、6CRC错误。这里只记录最近有效错误，旧非零码在恢复后仍可保留；需结合当次TEC／REC、年龄和时间戳判断，不能见旧码就认为正在出错。
+
+ch20：bit0 BusOff、bit1 ErrorPassive、bit2 Warning、bit3 RxErrorPassive、bit4 ProtocolException、bit5 RxFDFflag、bit6 RxBRSflag、bit7 RxESIflag。后三位是接收FD帧相关标志，不都是故障。HAL ErrorCode按本机HAL头文件解释，未新增中断通知或硬件错误处理。
+
+复现：记录投入前约1秒、一次摆腿失败及退出前约1秒，再失能保存全部39通道CSV。每次人工重试保持连续采集；同时观察哪台电机灯熄灭／重亮。先看四髋年龄是单台增加还是同时增加，再看RX累计是否停止、FIFO是否耗尽、TEC／REC与ACK码是否出现。电机err_raw出现保护码且反馈持续，与全总线无响应不同；但供电复位和线束断开都可能表现为无ACK，CSV不能独自区分，仍需要灯态或电机端电压证据。
+
+旧全过程页中的F/Tp、速度目标、支撑／blend、轮命令和PID实例P已替换；内部旧失能留证仍可Watch读取。源码参数和K快照仍见standup.md，但本次诊断不改控制参数。
+
+## 历史自起／LQR全过程（39通道）
+
+沿用Robot_Control_Send_Vofa，JustFloat、39通道、1152000、8N1，共160字节；vofa_trace_requested=0。替换旧页，不增加发送函数、任务或交替页。通信忙时跳帧，接收频率不等于1kHz控制频率。采集期间退出后继续录约1秒，再保存完整CSV。
+
+| 通道 | 内容 | 单位／解释 |
+|---|---|---|
+| ch0 | 原在线掩码 | 全在线255 |
+| ch1 | 原使能／翻倒／腿有效／控制器投入位 | bit8=LQR投入，bit9=RL投入 |
+| ch2 | ctrl_fault | 原故障掩码，替换旧RL信息 |
+| ch3、ch4 | 自起phase、fault | 0等待、1收腿、2摆腿、3交接／平衡、4失败；fault2=超时 |
+| ch5、ch6 | 阶段／连续到位计时 | ms，失败锁存 |
+| ch7、ch8 | 支撑support、交接blend | 0～1 |
+| ch9、ch10 | 左右长度目标 | m，自起准备或已投入LQR候选 |
+| ch11、ch12 | 左右控制摆角 | rad，Wrap(公共几何腿角)，与自起反馈一致 |
+| ch13、ch14 | 左右控制F | N，加入气弹簧补偿前；LQR投入时显示LQR候选 |
+| ch15、ch16 | 左右控制Tp | N·m，同上述候选选择 |
+| ch17、ch18 | 自起左右速度目标 | rad/s，正常LQR后是最后自起值，不参与LQR |
+| ch19、ch20 | 自起定义的左右摆角速度反馈 | rad/s，公共几何摆角速度 |
+| ch21～24 | 最近四髋下发命令 | N·m，控制坐标，左前／左后／右前／右后，混合与限幅后 |
+| ch25、ch26 | 原pitch、原pitch角速度 | rad、rad/s，用于自起控制坐标换算 |
+| ch27、ch28 | 左右实际腿长 | m |
+| ch29 | 世界pitch | rad，自起触发与保护使用 |
+| ch30 | 控制诊断位 | 见下方 |
+| ch31、ch32 | 左右摆角目标 | rad，自起angle_cmd或LQR target[THL/THR]+原pitch，换到几何角便于比较；不含模型x_eq |
+| ch33、ch34 | 最近左右轮力矩命令 | N·m，准备阶段零，交接渐入 |
+| ch35 | 板端通信周期时间戳 | ms，motor_state.timestamp_ms低24位；约4.66小时回绕，重复帧／跳帧可据此识别 |
+| ch36、ch37 | 自起左腿外／内环实际实例P | 初始化后与右腿相同；退出Reset可清为0 |
+| ch38 | LQR滤波后的pitch角速度 | rad/s，与ch26对比；LQR世界系腿摆速度=ch19/20−ch38，世界系腿角=ch11/12−ch25 |
+
+ch30：bit0自起enabled、bit1need、bit2世界pitch有效、bit3LQR状态valid、bit4gain_valid、bit5LQR已投入、bit6DM最近发送成功、bit7轮最近发送成功。ch1／30的投入位区分候选含义；ch0／2仍可识别掉线和保护，但旧ch31～38左腿留证页已被替换，内部vofa_stop_diag仍可通过Watch查看。
+
+当LQR已投入，ch9/10、13～16、31/32显示LQR候选；交接blend<1时最终下发并不等于单个候选，请结合ch8和ch21～24分析。自起输出／目标／实例P退出后可能清零，务必包含退出前记录。ch17/18是最后自起速度目标，不能当作LQR速度控制目标。
+
+观察流程：ch3从0直接到3且ch8=1、need=0意味着未触发自起，原Standup_Need只查摆角偏差>50°或世界pitch偏差>40°，没有腿长／机体接地判断。正常准备则1→2→3，已经短于0.19m可从0到2。ch3=2期间先看摆角目标／实际和速度目标／实际，再看Tp与最终四髋；ch6反复清零可由左右长度／摆角误差定位；ch3=3后看blend、轮输出与板端时间戳。失败fault2约4000ms为摆腿超时，延长时间不能自动消除持续振荡。
+
+只做当前布局打包／忙帧保护小测试和相关源编译；不改变控制和触发逻辑。当前参数与K表快照见 [自起说明](standup.md)。
+
+## 历史普通 VOFA（38 通道）
 
 `task_comm.c::Robot_Control_Send_Vofa()` 从通信任务非阻塞发送，实际接收频率受任务执行和传输忙状态影响，不能由 CSV 行数直接认定控制频率。VOFA+ 选择 JustFloat、38 通道；UART8 使用 1152000、8N1。
 
@@ -108,3 +178,9 @@ python tools/vofa_trace_decode.py vofa_capture.bin vofa_decoded_01
 比较起立故障时，先看 `obs_*` 的投影重力、角速度、关节位置与速度是否和视频姿态一致，再看 `hist_*` 是否已同步、`rl_ready`／`policy_ready` 与推理耗时是否表明策略真正接管。`action_*` 是策略输出，`dm_cmd_*`／`wheel_cmd_*` 是最近一次执行任务下发的力矩；结合各自 MCU 时间戳判断先后，不直接按同一行计算控制增益。若 `summary.json` 有丢样或历史失同步，先排除串口链路问题，再比较训练与实机数值。
 
 当前上电默认使用普通 VOFA；只有在失能且发送空闲时将 `vofa_trace_requested` 写 1，才会生成以下策略追踪帧。普通 CSV 与策略追踪 CSV 不混用。
+
+
+当前首次投入自起先检查后摆准备（phase5），双腿几何角进入−1.3±0.3rad并保持100ms后继续原收腿／摆腿；已满足可跳过phase5。旧全过程页中0直接3的说明是历史。本轮39通道CAN诊断页不变，后摆实际位置看ch36/37。
+
+
+最新流程6→5→1→2→3：先伸腿0.30m，再依入口world pitch选择上方路径到−1.3±0.3rad，再自起。目标、展开角可在Watch看standup_control；现有CAN诊断页ch36/37仍是环绕后的几何反馈，看到从+π跳到−π并不表示反转。首次已伸足或已在后摆区间允许跳过对应阶段。

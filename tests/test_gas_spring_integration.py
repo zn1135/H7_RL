@@ -441,30 +441,35 @@ static void lqr_pid_baseline(void)
     torque_output_t torque;
     const leg_state_t *leg[2];
     float force[2], roll, error, expected[2];
-    unsigned side, i;
+    unsigned side, i, prime;
 
-    fixture_setup();
-    leg[0] = &left_leg; leg[1] = &right_leg;
-    lqr_debug.len_pid_enable = 1u;
-    make_lqr(&state, &balance);
-    roll = -(machine->lqr.roll.kp + machine->lqr.roll.kd) * state.roll;
-    for (side = 0u; side < 2u; side++)
+    for (prime = 0u; prime < 2u; prime++)
     {
-        error = state.leg_len_tgt[side] - leg[side]->output.virtual_leg_length;
-        force[side] = (machine->lqr.leg_len[side].kp + machine->lqr.leg_len[side].kd) * error
-            + (side == 0u ? roll : -roll) + machine->lqr.support_force[side];
-    }
-    assert(run_lqr(&state, &balance, &torque));
-    for (side = 0u; side < 2u; side++)
-    {
-        near(balance.F[side], force[side]);
-        assert(Leg_Force_Map_Forward(leg[side], force[side] + expected_force(leg[side]), -state.u[LQR_U_BL + side], expected));
-        for (i = 0u; i < 2u; i++)
+        fixture_setup();
+        leg[0] = &left_leg; leg[1] = &right_leg;
+        lqr_debug.len_pid_enable = 1u;
+        make_lqr(&state, &balance);
+        balance.len_prime_enable = prime;
+        roll = -(machine->lqr.roll.kp + machine->lqr.roll.kd) * state.roll;
+        for (side = 0u; side < 2u; side++)
         {
-            near(torque.dm[side * 2u + i], reference_clip(expected[i], lqr_debug.trq_max_hip));
+            error = state.leg_len_tgt[side] - leg[side]->output.virtual_leg_length;
+            force[side] = (machine->lqr.leg_len[side].kp
+                + (prime ? 0.0f : machine->lqr.leg_len[side].kd)) * error
+                + (side == 0u ? roll : -roll) + machine->lqr.support_force[side];
         }
+        assert(run_lqr(&state, &balance, &torque));
+        for (side = 0u; side < 2u; side++)
+        {
+            near(balance.F[side], force[side]);
+            assert(Leg_Force_Map_Forward(leg[side], force[side] + expected_force(leg[side]), -state.u[LQR_U_BL + side], expected));
+            for (i = 0u; i < 2u; i++)
+            {
+                near(torque.dm[side * 2u + i], reference_clip(expected[i], lqr_debug.trq_max_hip));
+            }
+        }
+        near(torque.dji[0], 1.2f); near(torque.dji[1], -1.8f);
     }
-    near(torque.dji[0], 1.2f); near(torque.dji[1], -1.8f);
 }
 
 static void failures_dispatch_zero(void)
@@ -601,6 +606,28 @@ static void full_motor_output(void)
     assert(torque.dm[0] > 40.0f && torque.dm[0] < 54.0f);
 }
 
+static void rl_control_period(void)
+{
+    rl_torque_state_t controller;
+    torque_output_t torque;
+    float error;
+    float expected_dt;
+
+    fixture_setup();
+    expected_dt = MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG ? 0.002f : 0.001f;
+    near(MACHINE_RL_CTRL_DT,expected_dt);
+    RL_Torque_State_Init(&controller,&parameters);
+    controller.controller[VJ_L_WHEEL].i=0.4f;
+    controller.controller[VJ_L_WHEEL].IntegralLimit=1000.0f;
+    error=actions[VJ_L_WHEEL]*10.0f-wheel_velocity[0];
+    assert(RL_Torque_Compute(&left_leg,&right_leg,&parameters,
+        wheel_velocity,actions,&controller,&torque));
+    near(controller.controller[VJ_L_WHEEL].iout,0.4f*error*expected_dt);
+    assert(RL_Torque_Compute(&left_leg,&right_leg,&parameters,
+        wheel_velocity,actions,&controller,&torque));
+    near(controller.controller[VJ_L_WHEEL].iout,2.0f*0.4f*error*expected_dt);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -614,6 +641,7 @@ int main(int argc, char **argv)
     case 5: failures_dispatch_zero(); break;
     case 6: production_output_gate(); break;
     case 7: full_motor_output(); break;
+    case 8: rl_control_period(); break;
     default: assert(0); break;
     }
     return 0;
@@ -698,7 +726,7 @@ class GasSpringIntegrationTest(unittest.TestCase):
     def test_lqr_force_survives_length_pid_gate_and_preserves_torque(self):
         self.run_case(3)
 
-    def test_lqr_preserves_original_pid_baseline(self):
+    def test_lqr_pid_primed_startup_and_original_baseline(self):
         self.run_case(4)
 
     def test_failed_feedback_mapping_and_nonfinite_sum_dispatch_zero(self):
@@ -709,6 +737,9 @@ class GasSpringIntegrationTest(unittest.TestCase):
 
     def test_full_motor_output_reaches_wire_limits_and_preserves_mapped_torque(self):
         self.run_case(7)
+
+    def test_rl_pid_uses_its_own_execution_period(self):
+        self.run_case(8)
 
     def test_normal_vofa_layout_has_no_gas_page_hook(self):
         source = read("imcalib/task/task_comm.c")

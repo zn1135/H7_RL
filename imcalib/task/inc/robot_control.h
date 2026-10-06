@@ -27,6 +27,8 @@ typedef struct {
     uint32_t min_period_us;
     uint32_t max_period_us;
     uint32_t run_us;
+    uint32_t output_sequence;
+    uint32_t output_period_us;
 } control_time_debug_t;
 
 /* 控制策略 */

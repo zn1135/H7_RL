@@ -112,7 +112,7 @@ tools/matlab/
 | 腿质心表 | `leg.data_sjtu5 = [L0 l_wl l_bl I_ll]`；`leg.data_newton15 = [l lw_y lb_y delta Ileg]` | sjtu5 抄 Leg2 `Leg_data` 11 点；newton15 **待作者定**（推荐按五连杆各杆质量 + 解算几何算，或 CAD 导出） | newton15 抄 `leg_param.m` 9 点；sjtu5 由 newton15 换算（`l_wl = sqrt(lw_y²+delta²)` 等） |
 | 控制约束 | `ctrl.Ts, ctrl.T_wheel_max, ctrl.T_hip_max, ctrl.grid` | 0.001 / 1.8（`dji_trq_clamp`）/ 10（`dm_trq_clamp`）/ 0.13:0.01:0.23 | 0.001 / 4.8 / 20 / 待定 |
 
-**与板上重叠、必须一致的字段**：`wheel_r`、`leg.lu`、`leg.lg`、`leg.len_min/max`、`T_wheel_max`、`T_hip_max`、`Ts`（= `CTRL_DT`）。这些字段板上改了要手动同步到 `machine_table.m`（比对脚本已删）。其余质量、惯量板上没有，只在 MATLAB 表维护。
+**与板上重叠、必须一致的字段**：`wheel_r`、`leg.lu`、`leg.lg`、`leg.len_min/max`、`T_wheel_max`、`T_hip_max`、`Ts`（= `MACHINE_LQR_DT`，并与 `machine->lqr.dt` 一致）。这些字段板上改了要手动同步到 `machine_table.m`（比对脚本已删）。其余质量、惯量板上没有，只在 MATLAB 表维护。
 
 **K 表域**：`ctrl.grid` 的首尾就是 `LQR_K_LEN_MIN/MAX`。阶段 0~2 固定 0.13~0.23 与板上宏一致；要换域先改宏，属代码改动，单独授权。
 

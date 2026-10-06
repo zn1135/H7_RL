@@ -72,7 +72,7 @@ switch name
         m.leg.data_sjtu5 = [D(:,1), D(:,1)-lb, lb, Icom];
         m.leg.data_newton15 = [];
         m.leg.row_mode = 'interp';
-        m.ctrl.Ts = 0.002;
+        m.ctrl.Ts = 0.001;
         m.ctrl.T_wheel_max = (0.30*20)*(15.5/19.2);
         m.ctrl.T_hip_max = 54.0;
         m.ctrl.grid = 0.15:0.01:0.31;

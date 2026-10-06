@@ -3,6 +3,7 @@
 
 #include "main.h"
 #include "can_bus.h"
+#include "machine_config.h"
 #include <stdbool.h>
 
 /* 电机序 */
@@ -29,7 +30,7 @@ typedef enum {
 /* MIT量程: 见 machine_config.h (dm.c 内引用) */
 
 /* 超时值 */
-#define DM_OFFLINE_MS       10u
+#define DM_OFFLINE_MS       MACHINE_DM_OFFLINE_MS
 
 /* 固定参 (与 dji 同结构) */
 typedef motor_cfg_t dm_motor_config_t;

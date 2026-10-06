@@ -1291,6 +1291,11 @@
               <FileType>1</FileType>
               <FilePath>../imcalib/Algorithm/gas_spring.c</FilePath>
             </File>
+            <File>
+              <FileName>standup.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/Algorithm/standup.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1305,6 +1310,11 @@
               <FileName>task_imu.c</FileName>
               <FileType>1</FileType>
               <FilePath>../imcalib/task/task_imu.c</FilePath>
+            </File>
+            <File>
+              <FileName>pitch_world.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/task/pitch_world.c</FilePath>
             </File>
             <File>
               <FileName>task_policy.c</FileName>

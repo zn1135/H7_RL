@@ -2,6 +2,9 @@
 #include "hi229.h"
 #include "Attitude_Algorithm.h"
 #include "machine_config.h"
+#include "pitch_world.h"
+
+#define IMU_PITCH_WORLD_IDX  ATTITUDE_ROLL /* 沿用原取轴 */
 
 void imu_task_init(void)
 {
@@ -20,7 +23,12 @@ void imu_task_body(void)
     HI229_Process();
     if (!HI229_Online())
     {
+        primask = __get_PRIMASK();
+        __disable_irq();
         imu_state.online = 0u;
+        imu_state.pitch_world = 0.0f;
+        imu_state.pitch_world_valid = 0u;
+        __set_PRIMASK(primask);
         return;
     }
     sample = HI229_Snapshot();
@@ -47,6 +55,13 @@ void imu_task_body(void)
 
     /* 四元数归一化 + deg→rad */
     next.online = Attitude_Update(&next) ? 1u : 0u;
+    next.pitch_world = 0.0f;
+    next.pitch_world_valid = 0u;
+    if (next.online)
+    {
+        next.pitch_world_valid = Pitch_World_Calc(next.euler_rad[IMU_PITCH_WORLD_IDX],
+                                                 next.quat, &next.pitch_world) ? 1u : 0u;
+    }
     next.last_timestamp_ms = sample.ts;
     primask = __get_PRIMASK();
     __disable_irq();

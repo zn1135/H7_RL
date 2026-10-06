@@ -14,6 +14,8 @@ typedef struct {
     float F[2];         /* 足端力 (调试) */
     float Tp[2];        /* 虚拟髋扭矩 (调试) */
     torque_output_t cmd;     /* 力矩命令 (调试) */
+    uint8_t len_prime_enable; /* 首拍预置 */
+    uint8_t len_history_ready; /* 历史就绪 */
 } leg_balance_t;
 
 void    Leg_Balance_Init(leg_balance_t *lb);

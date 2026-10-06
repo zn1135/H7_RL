@@ -6,6 +6,7 @@
 #include "mono_ns.h"
 #include "joint_usb.h"
 #include "gas_spring.h"
+#include "standup.h"
 
 /*
  * 输出任务三层结构 (作者 2026-09-22 定: 解算只算, 分发唯一):
@@ -17,6 +18,7 @@
 
 static uint8_t lqr_running;     /* 已投入 */
 static uint8_t rl_engaged;      /* RL 已投入 */
+static uint8_t rl_wait_ticks;   /* 执行分频 */
 volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
 
@@ -136,6 +138,8 @@ static uint8_t lqr_engage_update(void)
     uint8_t ready;
 
     ready = (uint8_t)(robot_state.motor_enabled
+                      && ctrl_fault == FAULT_NONE && !robot_state.fallen
+                      && robot_state.rc_enable && rc_command.online
                       && imu_state.online
                       && leg_l.output.valid && leg_r.output.valid);
     if (!ready)
@@ -188,7 +192,7 @@ static void solve_gas_spring(torque_output_t *torque)
 /* LQR 平衡: 目标 → 状态反馈 → 腿部力控 */
 static void solve_lqr(torque_output_t *torque)
 {
-    if (!LQR_Target_Update(&lqr_state, &rc_command, CTRL_DT))
+    if (!LQR_Target_Update(&lqr_state, &rc_command, MACHINE_LQR_DT))
     {
         return;
     }
@@ -202,7 +206,53 @@ static void solve_lqr(torque_output_t *torque)
         return;
     }
     torque->valid = Leg_Balance_Compute(&leg_balance, &lqr_state, &leg_l, &leg_r,
-                                        CTRL_DT, torque);
+                                        MACHINE_LQR_DT, torque);
+}
+
+/* 独立自起选路 */
+static void solve_lqr_standup(torque_output_t *torque)
+{
+    uint8_t permit;
+    uint8_t allow_restart;
+    uint8_t route;
+    uint8_t was_done;
+
+    permit = (uint8_t)(robot_state.motor_enabled && robot_state.rc_enable
+        && rc_command.online && ctrl_fault == FAULT_NONE && !robot_state.fallen
+        && imu_state.online && torque_output_enabled);
+    allow_restart = (uint8_t)(rc_command.vel == 0.0f && rc_command.yaw == 0.0f
+        && rc_command.len == 0.0f);
+    was_done = (uint8_t)(standup_control.phase == STANDUP_DONE);
+    if (was_done && permit && lqr_engage_update())
+    {
+        solve_lqr(torque);
+    }
+    route = Standup_Update(&standup_control, &imu_state, &leg_l, &leg_r,
+        permit, allow_restart, MACHINE_LQR_DT, torque);
+    if (route == STANDUP_ROUTE_BALANCE)
+    {
+        if (!was_done)
+        {
+            if (lqr_engage_update())
+            {
+                solve_lqr(torque);
+            }
+            else
+            {
+                Standup_Fail(&standup_control, STANDUP_GATED);
+            }
+        }
+        if (!torque->valid)
+        {
+            Standup_Fail(&standup_control, STANDUP_BAD_INPUT);
+            Torque_Output_Clear(torque);
+            lqr_idle();
+        }
+    }
+    else
+    {
+        lqr_idle();
+    }
 }
 
 /* RL: 动作 → 力矩; 前提: 遥控使能 + 电机使能 + 两腿有效 + 推理动作可用 */
@@ -233,8 +283,10 @@ void output_task_body(void)
     torque_output_t torque;
     torque_output_t sent_torque;
     uint8_t i;
+    uint8_t dispatch;
 #if CONTROL_TIME_VOFA_ENABLE
     static uint32_t previous_start_us;
+    static uint32_t previous_output_us;
     uint32_t start_us;
     uint32_t period_us;
     uint32_t run_us;
@@ -251,14 +303,29 @@ void output_task_body(void)
     /* 1 估计: 每拍必算 (同 RL 观测) */
     if (LQR_Gain_Compatible())
     {
-        (void)LQR_State_Update(&lqr_state, &imu_state, &leg_l, &leg_r, wheel_vel, CTRL_DT);
+        (void)LQR_State_Update(&lqr_state, &imu_state, &leg_l, &leg_r, wheel_vel, MACHINE_LQR_DT);
     }
 
     /* 2 求解: torque 默认全零 valid=0, 只有走通的分支才置 valid */
     Torque_Output_Clear(&torque);
     strategy = strategy_from_remote(&rc_command);
     ctrl_strategy = strategy;
+    if (!standup_control.enabled || gas_spring_only_enabled || JointUsb_ModeLock()
+        || (rc_command.online && (rc_command.s1 != DR16_SW_MID
+            || rc_command.s2 != DR16_SW_MID)))
+    {
+        Standup_Reset(&standup_control);
+    }
+    else if (strategy != CTRL_STRATEGY_LQR && standup_control.phase != STANDUP_IDLE)
+    {
+        Standup_Fail(&standup_control, STANDUP_GATED);
+    }
     rl_engaged = 0u;
+    dispatch = 1u;
+    if (strategy != CTRL_STRATEGY_RL)
+    {
+        rl_wait_ticks = 0u;
+    }
 
     switch (strategy)
     {
@@ -269,7 +336,11 @@ void output_task_body(void)
 
     case CTRL_STRATEGY_LQR:
     {
-        if (rc_command.s2 == DR16_SW_MID && lqr_engage_update())
+        if (standup_control.enabled && rc_command.s2 == DR16_SW_MID)
+        {
+            solve_lqr_standup(&torque);
+        }
+        else if (rc_command.s2 == DR16_SW_MID && lqr_engage_update())
         {
             solve_lqr(&torque);
         }
@@ -282,10 +353,29 @@ void output_task_body(void)
 
     case CTRL_STRATEGY_RL:
         lqr_running = 0u;
-        rl_engaged = (uint8_t)(rc_command.s2 == DR16_SW_MID && robot_state.motor_enabled);
-        if (rl_engaged)
+        rl_engaged = (uint8_t)(rc_command.s2 == DR16_SW_MID && robot_state.motor_enabled
+                               && robot_state.rc_enable && rc_command.online
+                               && ctrl_fault == FAULT_NONE && !robot_state.fallen);
+        if (rl_engaged && action_state.rl_ready
+            && leg_l.output.valid && leg_r.output.valid && torque_output_enabled)
         {
-            solve_rl(wheel_vel, &torque);
+            if (rl_wait_ticks == 0u)
+            {
+                solve_rl(wheel_vel, &torque);
+                if (torque.valid)
+                {
+                    rl_wait_ticks = MACHINE_RL_CTRL_DIV - 1u;
+                }
+            }
+            else
+            {
+                rl_wait_ticks--;
+                dispatch = 0u;
+            }
+        }
+        else
+        {
+            rl_wait_ticks = 0u;
         }
         break;
 
@@ -301,10 +391,17 @@ void output_task_body(void)
     }
 
     /* 3 分发: 唯一出口 */
+    if (dispatch)
     {
         uint64_t queue_ns = Mono_Ns_Get();
 
         output_dispatch(&torque);
+#if CONTROL_TIME_VOFA_ENABLE
+        control_time_debug.output_period_us = control_time_debug.output_sequence != 0u
+            ? start_us - previous_output_us : 0u;
+        previous_output_us = start_us;
+        control_time_debug.output_sequence++;
+#endif
         if (JointUsb_ModeLock() || JointUsb_StreamRequested())
         {
             /* 记录最终命令 */

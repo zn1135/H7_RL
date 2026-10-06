@@ -77,6 +77,19 @@ static void metadata(void)
     lqr_gain_desc_t d=*LQR_Gain_Info(); machine_cfg_t cfg=*machine;
     float k[40], edge[40]; unsigned i;
     assert(d.machine_id==MACHINE_DEFAULT && LQR_Gain_Compatible());
+    assert(MACHINE_TIM6_PERIOD==999 && MACHINE_LQR_DT==0.001f);
+    near(machine->lqr.dt,MACHINE_LQR_DT);
+#if MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
+    {
+        lowpass1d_t lp;
+        Lowpass_Init(&lp,machine->lqr.lpf_alpha[0]);
+        Lowpass_Update(&lp,1.0f);
+        near(Lowpass_Update(&lp,1.0f),0.51f);
+        near(machine->lqr.leg_len[0].kd*machine->lqr.dt,25.0f);
+        near(machine->lqr.roll.kd*machine->lqr.dt,0.1f);
+        near(machine->lqr.kf_q/machine->lqr.dt,7.0f);
+    }
+#endif
     assert(LQR_Gain_Check(&d,&cfg,MACHINE_DEFAULT,MACHINE_CTRL_DT)==LQR_GAIN_OK);
     d.machine_id=2;
     assert(LQR_Gain_Check(&d,&cfg,MACHINE_DEFAULT,MACHINE_CTRL_DT)==LQR_GAIN_BAD_MACHINE);
@@ -115,6 +128,92 @@ static void chain(void)
     near(balance.F[0],machine->lqr.support_force[0]);
     near(balance.F[1],machine->lqr.support_force[1]);
     near(balance.Tp[0],0); near(balance.Tp[1],0);
+}
+static void length_history_startup(void)
+{
+    lqr_state_t state;
+    leg_balance_t balance;
+    torque_output_t torque;
+    float last_error;
+    float error;
+
+    setup(); LQR_Init(&state); Leg_Balance_Init(&balance);
+    assert(!balance.len_history_ready);
+    balance.len_prime_enable = 0;
+    state.leg_len_tgt[0] = legs[0].output.virtual_leg_length - 0.04f;
+    state.leg_len_tgt[1] = legs[1].output.virtual_leg_length + 0.03f;
+    state.u[LQR_U_WL] = 0.6f; state.u[LQR_U_WR] = -0.7f;
+    state.u[LQR_U_BL] = 0.8f; state.u[LQR_U_BR] = -0.9f;
+
+    assert(Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    near(balance.leg_len[0].dout,balance.leg_len[0].d*balance.leg_len[0].err[NOW]);
+    near(balance.leg_len[1].dout,balance.leg_len[1].d*balance.leg_len[1].err[NOW]);
+    Leg_Balance_Reset(&balance);
+    balance.len_prime_enable = 1;
+
+    legs[0].output.valid = 0;
+    assert(!Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    assert(balance.leg_len[0].err[LAST] == 0.0f);
+    assert(!balance.len_history_ready);
+    legs[0].output.valid = 1;
+    state.leg_len_tgt[0] = NAN;
+    assert(!Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    assert(!balance.len_history_ready);
+    state.leg_len_tgt[0] = legs[0].output.virtual_leg_length - 0.04f;
+    assert(Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    assert(balance.len_history_ready);
+    near(balance.leg_len[0].dout,0.0f); near(balance.leg_len[1].dout,0.0f);
+    near(balance.leg_len[0].pout,balance.leg_len[0].p*balance.leg_len[0].err[NOW]);
+    near(balance.leg_len[1].pout,balance.leg_len[1].p*balance.leg_len[1].err[NOW]);
+    near(balance.Tp[0],-state.u[LQR_U_BL]); near(balance.Tp[1],-state.u[LQR_U_BR]);
+    near(torque.dji[0],state.u[LQR_U_WL]); near(torque.dji[1],state.u[LQR_U_WR]);
+
+    last_error = balance.leg_len[0].err[LAST];
+    legs[0].input.hip_f += 0.001f; assert(Leg_Solve(&legs[0]));
+    error = state.leg_len_tgt[0] - legs[0].output.virtual_leg_length;
+    assert(fabsf(error-last_error)>0.000001f);
+    assert(Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    near(balance.leg_len[0].dout,balance.leg_len[0].d*(error-last_error));
+
+    Leg_Balance_Reset(&balance);
+    assert(balance.len_prime_enable && !balance.len_history_ready);
+    state.leg_len_tgt[0] -= 0.02f; state.leg_len_tgt[1] += 0.01f;
+    assert(Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    near(balance.leg_len[0].dout,0.0f); near(balance.leg_len[1].dout,0.0f);
+
+    balance.len_prime_enable = 0;
+    Leg_Balance_Reset(&balance);
+    assert(!balance.len_prime_enable && !balance.len_history_ready);
+    assert(Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    near(balance.leg_len[0].dout,balance.leg_len[0].d*balance.leg_len[0].err[NOW]);
+    near(balance.leg_len[1].dout,balance.leg_len[1].d*balance.leg_len[1].err[NOW]);
+}
+
+static void command_yaw_direction(void)
+{
+    lqr_state_t state;
+    unsigned i;
+    setup(); LQR_Init(&state);
+    state.valid=1; state.len[0]=state.len[1]=0.18f;
+    state.x[LQR_X_S]=machine->lqr.pos_target;
+    state.x[LQR_X_THL]=machine->lqr.leg_trim[0];
+    state.x[LQR_X_THR]=machine->lqr.leg_trim[1];
+    state.x[LQR_X_THB]=machine->lqr.pitch_trim;
+    remote.yaw=0.3f;
+    assert(LQR_Target_Update(&state,&remote,MACHINE_CTRL_DT));
+    assert(state.target[LQR_X_DPHI]>0);
+    LQR_Control_Update(&state);
+    assert(state.gain_valid && state.u[LQR_U_WL]<0 && state.u[LQR_U_WR]>0);
+    remote.yaw=-0.3f;
+    assert(LQR_Target_Update(&state,&remote,MACHINE_CTRL_DT));
+    assert(state.target[LQR_X_DPHI]<0);
+    LQR_Control_Update(&state);
+    assert(state.gain_valid && state.u[LQR_U_WL]>0 && state.u[LQR_U_WR]<0);
+    remote.yaw=0;
+    assert(LQR_Target_Update(&state,&remote,MACHINE_CTRL_DT));
+    near(state.target[LQR_X_DPHI],0);
+    LQR_Control_Update(&state);
+    for(i=0;i<4;i++) { near(state.u[i],0); }
 }
 static void invalid(void)
 {
@@ -190,15 +289,18 @@ static void world_leg_conversion(void)
 static void replay(void)
 {
     lqr_state_t old, now; leg_balance_t bo,bn; torque_output_t to,tn;
+    rc_command_t old_remote;
     unsigned t,i;
     setup(); Baseline_LQR_Init(&old); LQR_Init(&now); lqr_debug.legacy_gain=1;
     Baseline_Leg_Balance_Init(&bo); Leg_Balance_Init(&bn);
+    bn.len_prime_enable=0; /* Strict historical startup comparison. */
     Baseline_LQR_Enable_Latch(&old,&legs[0],&legs[1]);
     LQR_Enable_Latch(&now,&legs[0],&legs[1]);
     for(t=0;t<100;t++)
     {
         remote.vel=t<50?0.05f:0; remote.yaw=t%3?0:0.03f; remote.len=t<20?0.02f:0;
-        Baseline_LQR_Target_Update(&old,&remote,MACHINE_CTRL_DT);
+        old_remote=remote; old_remote.yaw=-remote.yaw;
+        Baseline_LQR_Target_Update(&old,&old_remote,MACHINE_CTRL_DT);
         LQR_Target_Update(&now,&remote,MACHINE_CTRL_DT);
         assert(Baseline_LQR_State_Update(&old,&imu,&legs[0],&legs[1],wheels,MACHINE_CTRL_DT));
         assert(LQR_State_Update(&now,&imu,&legs[0],&legs[1],wheels,MACHINE_CTRL_DT));
@@ -228,7 +330,7 @@ int main(int argc,char **argv)
         for(i=0;i<40;i++) { printf("%.9g\n",k[i]); }
         return 0;
     }
-    metadata(); chain(); invalid(); geometry_power(); world_leg_conversion();
+    metadata(); chain(); length_history_startup(); command_yaw_direction(); invalid(); geometry_power(); world_leg_conversion();
 #if MACHINE_DEFAULT == MACHINE_ID_SMALL_WHEELLEG
     replay();
 #endif

@@ -155,13 +155,13 @@ uint8_t LQR_Target_Update(lqr_state_t *st, const rc_command_t *cmd, float dt)
         }
     }
     st->target[LQR_X_DS]    = st->vel_tgt;
-    /* 偏航: 摇杆有输入时目标跟随当前角 (不回正), 回中后锁住; 转向通道取负 (同 Leg2, 作者台架定) */
+    /* 转向沿用归一方向 */
     if (cmd->yaw != 0.0f)
     {
         st->yaw_tgt = st->x[LQR_X_PHI];
     }
     st->target[LQR_X_PHI]   = st->yaw_tgt;
-    st->target[LQR_X_DPHI]  = -cmd->yaw * machine->lqr.yaw_max;
+    st->target[LQR_X_DPHI]  = cmd->yaw * machine->lqr.yaw_max;
     st->target[LQR_X_THL]   = machine->lqr.leg_trim[0];
     st->target[LQR_X_DTHL]  = 0.0f;
     st->target[LQR_X_THR]   = machine->lqr.leg_trim[1];

@@ -5,6 +5,7 @@
 #include "dji.h"
 #include "can_bus.h"
 #include "machine_config.h"
+#include "standup.h"
 #include "Vofa_send.h"
 #include "uart_idle.h"
 #include "ws2812.h"
@@ -151,9 +152,13 @@ static void Robot_Fault_Update(void)
 static void Robot_Fallen_Update(void)
 {
     float pitch_abs;
+    uint8_t pitch_valid;
 
-    pitch_abs = fabsf(imu_state.euler_rad[ATTITUDE_PITCH]);
-    if (pitch_abs > 1.4f)
+    taskENTER_CRITICAL();
+    pitch_abs = fabsf(imu_state.pitch_world);
+    pitch_valid = (uint8_t)(imu_state.online && imu_state.pitch_world_valid);
+    taskEXIT_CRITICAL();
+    if (!pitch_valid || !isfinite(pitch_abs) || pitch_abs > 1.4f)
     {
         robot_state.fallen = 1u;
     }

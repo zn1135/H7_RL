@@ -21,11 +21,11 @@ switch CFG.machine
     case 'small_wheelleg'
         %    位移   速度  偏航角     左摆角         右摆角       pitch
         %      s     ds   phi  dphi th_ll dth_ll th_lr dth_lr th_b  dth_b
-        q = [16000, 1200, 1000, 870, 11000,  250,  11000,  250, 7000, 500];   % Leg2 mlx 生效组 = 板上现表
+        q = [16000, 1200, 1000, 870, 8000,  250,  8000,  250, 7000, 500];   % Leg2 mlx 生效组 = 板上现表
         r = [5480, 5480, 650, 650];                                          % T_wl T_wr T_bl T_br
     case 'big_wheelleg'
-        q = [100, 1, 4000, 1, 3000, 10, 3000, 10, 40000, 1];             % Leg3 候选权重
-        r = [50, 50, 1, 1];                                           % Leg3 按轮/髋重排
+        q = [300, 1, 4000, 1, 600, 10, 600, 10, 55000, 1];             % Leg3 候选权重
+        r = [100, 100, 1, 1];                                           % Leg3 按轮/髋重排
         CFG.fit_order = 3;
     otherwise
         error('run_all:machine', '未知机器 "%s" (small_wheelleg / big_wheelleg)', CFG.machine);
