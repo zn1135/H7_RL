@@ -40,7 +40,6 @@ typedef struct {
     uint8_t yaw_hold;          /* 偏航角环 */
     uint8_t yaw_rate_hold;     /* 偏航角速度环 */
     uint8_t pos_hold;          /* 位移环 (0 = 位移列不进控制) */
-    float   vel_ramp;          /* 速度目标斜坡 m/s^2 (0 = 不斜坡, 阶跃) */
     float   acc_fwd_sign;      /* 前向加速度符号 */
     float   pitch_comp_sign;   /* 轮速补偿俯仰项符号 */
     float   pos_arm_vel;       /* 松杆后车速低于此才积位移 m/s (0 = 立即) */
@@ -72,17 +71,18 @@ typedef struct {
     float pos;                      /* 位移积分 */
     uint8_t pos_armed;              /* 位移积分已启动 */
     float yaw_tgt;                  /* 偏航角目标 */
-    float vel_tgt;                  /* 速度目标 (斜坡后) */
+    float vel_tgt;                  /* 速度目标 */
     float roll;                     /* 机体横滚角 */
+    kalman_accel_t kf_vel;          /* 速度KF */
     lowpass1d_t lpf_vel;            /* 速度低通 */
     lowpass1d_t lpf_omg_pitch;      /* 俯仰角速度低通 */
     lowpass1d_t lpf_omg_yaw;        /* 偏航角速度低通 */
-    kalman_accel_t kf_vel;          /* 速度卡尔曼 */
 } lqr_state_t;
 
 extern lqr_debug_t lqr_debug;
 
 void    LQR_Init(lqr_state_t *st);
+void    LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt);
 uint8_t LQR_Enable_Latch(lqr_state_t *st, const leg_state_t *leg_l,
                          const leg_state_t *leg_r);
 uint8_t LQR_Target_Update(lqr_state_t *st, const rc_command_t *cmd, float dt);

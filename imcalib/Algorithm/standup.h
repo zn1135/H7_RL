@@ -14,6 +14,16 @@ enum {
     STANDUP_FAILED,
     STANDUP_REAR,
     STANDUP_EXTEND,
+    STANDUP_SETTLE,
+    STANDUP_TUCK,
+    STANDUP_FLIP,
+};
+
+enum {
+    STANDUP_POSE_NORMAL = 0,
+    STANDUP_POSE_INVERTED,
+    STANDUP_POSE_SIDE,
+    STANDUP_POSE_INVALID,
 };
 
 enum {
@@ -32,6 +42,17 @@ enum {
 };
 
 typedef struct {
+    float recovery_settle_time;
+    float recovery_tuck_time;
+    float recovery_len;
+    float recovery_angle_rate;
+    float recovery_force_max;
+    float recovery_ready_pitch;
+    float recovery_timeout;
+    float recovery_stall_time;
+    uint8_t recovery_retry_max;
+    float retry_wait;
+    float trigger_roll;
     float extend_len;
     float extend_tol;
     float extend_timeout;
@@ -47,6 +68,9 @@ typedef struct {
     float angle_speed_kd;
     float angle_speed_max;
     float tp_max;
+    float roll_force_max;
+    float roll_force_rate;
+    float roll_ready;
     float trigger_angle;
     float trigger_pitch;
     float angle_tol;
@@ -62,12 +86,18 @@ typedef struct {
 
 typedef struct {
     uint8_t enabled;
+    uint8_t recovery_enabled;
+    uint8_t pose;
+    uint8_t retry;
+    uint8_t recovered;
     uint8_t phase;
     uint8_t fault;
     uint8_t need;
     uint8_t len_history_ready;
     uint8_t angle_history_ready;
     uint8_t rear_path_ready;
+    uint8_t roll_history_ready;
+    float retry_elapsed;
     float elapsed;
     float stable;
     float trigger_elapsed;
@@ -79,11 +109,22 @@ typedef struct {
     float rear_position[2];   /* 展开角 */
     float rear_goal[2];
     float rear_last[2];
+    float recovery_position[2];
+    float recovery_last[2];
+    float recovery_sweep;
+    float stall_elapsed;
+    float stall_upright;
+    float upright;
+    float side;
     float force[2];
     float tp[2];
+    float roll_force;
+    float roll_weight;
+    float roll_applied;
     pid_t length_pid[2];
     pid_t angle_pos_pid[2];
     pid_t angle_speed_pid[2];
+    pid_t roll_pid;
     torque_output_t prepare;
     float raw_dm[DM_MOTOR_NUM];   /* 限幅前 */
 } standup_ctx_t;

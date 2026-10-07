@@ -81,10 +81,10 @@ DR16_Parse: 解析 18 字节 → dr16_t
 
 | 字段 | 解析位置 | 范围 | 用途 |
 |------|:--------:|:----:|------|
-| ch0 | buf[0..1] | ±660 | yaw 指令 → `rc_command.yaw`（LQR 偏航 / RL `command[1]`） |
+| ch0 | buf[0..1] | ±660 | 右摇杆 X → `rc_command.yaw`（LQR 偏航 / RL `command[1]`） |
 | ch1 | buf[1..2] | ±660 | 前进速度 → `rc_command.vel`（LQR 速度 / RL `command[0]`） |
-| ch2 | buf[2..4] | ±660 | **无消费**（仅解析 + 范围校验） |
-| ch3 | buf[4..5] | ±660 | → `rc_command.ang`（**当前无消费**） |
+| ch2 | buf[2..4] | ±660 | 仅解析 + 范围校验 |
+| ch3 | buf[4..5] | ±660 | 仅解析 + 范围校验，摆角命令已删除 |
 | wheel | buf[16..17] | ±660 | 腿长 / 高度 → `rc_command.len`（LQR 腿长积分 / RL `command[2]`） |
 | s1 | (buf[5]>>6)&3 | 1/2/3 | 挡位选择 + 使能（§6） |
 | s2 | (buf[5]>>4)&3 | 1/2/3 | 投入出力（§6） |
@@ -114,24 +114,23 @@ DR16_Parse: 解析 18 字节 → dr16_t
 
 摇杆只在一处解算：`commTask` → `Remote_Control_Update()` (`task_comm.c:67`) → `Rc_Command_Update()` (`user-lib/rc_command.c`) 填全局 `rc_command`，各链路只读。
 
-**`rc_command_t`** (死区 + 限幅 ±660 → [-1, 1], `rc_command.c:4-18`):
+**`rc_command_t`**：死区内清零，区外保留原值；夹在 ±660 后除以 660。`vel/yaw` 再乘本机 `machine->lqr.vel_max/yaw_max`，输出实际单位；`len` 保持 [-1, 1]。
 
 | 字段 | 通道 | 死区 | 含义 |
 |------|------|:----:|------|
-| `vel` | ch1 右摇杆 Y | 10 | 前进 |
-| `yaw` | ch0 右摇杆 X | 20 | 转向 |
+| `vel` | ch1 右摇杆 Y | 10 | 前进速度 m/s |
+| `yaw` | ch0 右摇杆 X | 20 | 偏航角速度 rad/s，保留原命令负号 |
 | `len` | wheel 拨轮 | 20 | 腿长 / 高度 |
-| `ang` | ch3 左摇杆 Y | 20 | 摆角 / 大腿（**当前无消费**） |
 | `s1` / `s2` / `online` | 拨杆 / 在线 | — | 仲裁用 |
 
-死区常量 `RC_DEADBAND_VEL/YAW/LEN/ANG` 见 `rc_command.h:7-10`。
+死区常量 `RC_DEADBAND_VEL/YAW/LEN` 见 `rc_command.h`。`ang` 字段及其死区宏已删除。
 
 **消费端**（当前）:
 
 | 链路 | 位置 | 用法 |
 |------|------|------|
-| LQR | `lqr_balance.c:141` `LQR_Target_Update()`（`task_actuation.c:124` 调用） | `vel × LQR_RC_VEL_MAX` 速度目标（`lqr_balance.h:41`，现值 1.2 m/s，可再经 `lqr_debug.vel_ramp` 斜坡）；`−yaw × LQR_RC_YAW_MAX` 偏航角速度目标 + 摇杆有输入时锁当前朝向（`lqr_balance.h:42`，现值 5 rad/s）；`len × LQR_RC_LEN_RATE × dt` 积分成腿长目标、夹在腿长工作区间（`lqr_balance.h:43`，现值 0.3 m/s）；`ang` 无消费 |
-| RL 推理指令 | `task_policy.c:120` `RL_Command_From_Rc()`（`RL_Infer_Body()` 每拍调用，`task_policy.c:154`） | `command[0] ← vel × RL_CMD_VX_MAX`、`command[1] ← −yaw × RL_CMD_YAW_MAX`（右推为负，同 LQR）、`command[2] ← len` 线性到 `[RL_CMD_HEIGHT_MIN, RL_CMD_HEIGHT_MAX]`；宏在 `rl_policy.h:10-13`，数值以代码为准、待训练侧（代码注释标注为起立策略训练域，拨轮暂无效） |
+| LQR | `lqr_balance.c::LQR_Target_Update()`，`solve_lqr()` 调用 | `vel/yaw` 直接写入速度/偏航角速度目标，不经过速度命令斜坡、不重复乘上限。转向时朝向目标跟随实测，松杆后保持。`len × machine->lqr.len_rate × dt` 积分成腿长目标，夹在机械与 K 表区间的交集 |
+| RL 推理指令 | `task_policy.c::RL_Command_From_Rc()` | 实际 `vel/yaw` 先除以对应 LQR 上限，再按原 `RL_CMD_VX_MAX/YAW_MAX` 换算；保留原 RL yaw 反号和训练范围，上限非正时输出零。高度由 `len × RL_CMD_HEIGHT_RATE × MACHINE_POLICY_DT` 积分并限幅，未投入时回初始高度。参数以 `rl_policy.h` 为准 |
 | RL 观测 | `task_policy.c:71/92` → `rl_observation.c::RL_Observation_Build()` | `command[3]` 进观测，再乘 `RL_OBS_CMD_*_SCALE`（`rl_observation.h:13-15`） |
 | 挡位 / 投入 | `task_actuation.c:72` `strategy_from_remote()` + `:176-204` | `s1`：中 = LQR、上 = RL、下 / 离线 = 失能 → `ctrl_strategy`；`s2` 中位 = 投入出力（LQR `:180`、RL `:193`），其他位 = 已选模式但零力矩 |
 | 使能 / 故障 | `strategy_rc_enable()`（`task_actuation.c`） | online + 左中且 `lqr_configured` / 左上且 `rl.configured` → `robot_state.rc_enable`（`task_comm.c`）；RL 挡（`ctrl_strategy == CTRL_STRATEGY_RL`）动作过期或已投入但动作持续不可用（`rl_ready` 持续 0）≥100ms → `FAULT_ACTION`（`Robot_Fault_Update()`，2026-09-25 收敛为唯一函数） |
@@ -142,7 +141,7 @@ DR16_Parse: 解析 18 字节 → dr16_t
 |------|------|------|
 | ~~RL 观测（旧）~~ | ~~`task_policy.c::Remote_Command_Apply()`~~ | `vx_cmd ← vel`、`yaw_cmd ← yaw`、`height_cmd ← len`，各 × `REMOTE_COMMAND_SCALE`（旧手动遥操路径，git `3a943aa` 及以前） |
 | ~~RL 手动偏移（旧）~~ | 同上 | `thigh ← ang × 4`、`shank ← len × 4`、`wheel ← vel × 4` 叠加 base action（`MANUAL_ACTION_SCALE`，git `3a943aa`） |
-| ~~LQR 手动腿测（旧）~~ | — | 曾记"手动时 `ang × 0.5 rad` 摆角"；当前 `ang` 仅在 `rc_command.c` 赋值，无任何消费（与早期文档记录不同，待作者确认） |
+| ~~LQR 手动腿测（旧）~~ | — | 曾记"手动时 `ang × 0.5 rad` 摆角"；无消费者的 `ang` 命令已删除 |
 
 ---
 

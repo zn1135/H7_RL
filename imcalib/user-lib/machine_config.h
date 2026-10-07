@@ -89,7 +89,6 @@ typedef struct {
     float vel_max;
     float yaw_max;
     float len_rate;
-    float vel_ramp;
     float pos_arm_vel;
     float lpf_alpha[3];             /* 三路低通 */
     float kf_p0;

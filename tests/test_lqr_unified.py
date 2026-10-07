@@ -295,11 +295,14 @@ static void replay(void)
     Baseline_Leg_Balance_Init(&bo); Leg_Balance_Init(&bn);
     bn.len_prime_enable=0; /* Strict historical startup comparison. */
     Baseline_LQR_Enable_Latch(&old,&legs[0],&legs[1]);
+    baseline_debug.vel_ramp=0; /* Current targets are immediate. */
     LQR_Enable_Latch(&now,&legs[0],&legs[1]);
     for(t=0;t<100;t++)
     {
         remote.vel=t<50?0.05f:0; remote.yaw=t%3?0:0.03f; remote.len=t<20?0.02f:0;
-        old_remote=remote; old_remote.yaw=-remote.yaw;
+        old_remote=remote;
+        old_remote.vel=remote.vel/machine->lqr.vel_max;
+        old_remote.yaw=-remote.yaw/machine->lqr.yaw_max;
         Baseline_LQR_Target_Update(&old,&old_remote,MACHINE_CTRL_DT);
         LQR_Target_Update(&now,&remote,MACHINE_CTRL_DT);
         assert(Baseline_LQR_State_Update(&old,&imu,&legs[0],&legs[1],wheels,MACHINE_CTRL_DT));
@@ -341,6 +344,9 @@ int main(int argc,char **argv)
 
 def baseline():
     text = "\n".join(re.findall(r"^#define\s+[^\n]+", read("tests/fixtures/baseline_lqr_balance.h"), re.M)[1:])
+    debug_type = re.search(r"typedef\s+struct\s*\{[^}]*\}\s*lqr_debug_t\s*;",
+                           read("tests/fixtures/baseline_lqr_balance.h")).group()
+    text += "\n" + debug_type.replace("lqr_debug_t", "baseline_debug_t")
     text += "\n" + "\n".join(re.findall(r"^#define LEG_BALANCE_\w+[^\n]*", read("tests/fixtures/baseline_leg_balance.h"), re.M))
     text += "\n" + read("tools/matlab/baseline/lqr_gain_small_legacy.inc").replace("LQR_K_Small_Legacy", "Baseline_K")
     for filename in ("lqr_balance.c", "leg_balance.c"):
@@ -355,7 +361,7 @@ def baseline():
                      "LQR_Control_Update", "LQR_Wrap_Pi", "LQR_Len_Range", "LQR_Accel_Forward",
                      "Leg_Balance_Init", "Leg_Balance_Reset", "Leg_Balance_Compute", "Leg_Balance_Output"):
             source = re.sub(r"\b" + name + r"\b", "Baseline_" + name, source)
-        source = source.replace("LQR_K_WBR", "Baseline_K").replace("lqr_debug", "baseline_debug").replace("baseline_debug_t", "lqr_debug_t")
+        source = source.replace("LQR_K_WBR", "Baseline_K").replace("lqr_debug", "baseline_debug")
         text += "\n" + source
     return "#if MACHINE_DEFAULT == MACHINE_ID_SMALL_WHEELLEG\n" + text + "\n#endif\n"
 

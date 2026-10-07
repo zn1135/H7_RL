@@ -20,7 +20,6 @@
 #define LQR_IMU_GYRO_YAW     2u
 
 lqr_debug_t lqr_debug;
-
 /* 角度环绕 [-π, π] */
 static float LQR_Wrap_Pi(float angle)
 {
@@ -48,7 +47,6 @@ void LQR_Init(lqr_state_t *st)
     lqr_debug.yaw_hold = machine->lqr.yaw_hold;
     lqr_debug.yaw_rate_hold = machine->lqr.yaw_rate_hold;
     lqr_debug.pos_hold = machine->lqr.pos_hold;
-    lqr_debug.vel_ramp = machine->lqr.vel_ramp;
     lqr_debug.acc_fwd_sign = 1.0f;
     lqr_debug.pitch_comp_sign = -1.0f;  /* 现行公式 */
     lqr_debug.pos_arm_vel = machine->lqr.pos_arm_vel;
@@ -62,8 +60,8 @@ void LQR_Init(lqr_state_t *st)
     Lowpass_Init(&st->lpf_vel, machine->lqr.lpf_alpha[0]);
     Lowpass_Init(&st->lpf_omg_pitch, machine->lqr.lpf_alpha[1]);
     Lowpass_Init(&st->lpf_omg_yaw, machine->lqr.lpf_alpha[2]);
-    Kalman_Accel_Init(&st->kf_vel, 0.0f, machine->lqr.kf_p0, machine->lqr.kf_q,
-                      machine->lqr.kf_r, machine->lqr.kf_p_max);
+    Kalman_Accel_Init(&st->kf_vel, 0.0f, machine->lqr.kf_p0,
+        machine->lqr.kf_q, machine->lqr.kf_r, machine->lqr.kf_p_max);
 }
 
 /* 前向加速度: 四元数把机体加速度转到世界系, 去重力, 投影到车头水平方向 */
@@ -140,28 +138,15 @@ uint8_t LQR_Target_Update(lqr_state_t *st, const rc_command_t *cmd, float dt)
     LQR_Len_Range(&len_min, &len_max);
 
     st->target[LQR_X_S]     = machine->lqr.pos_target;
-    /* 速度目标斜坡 (同 Leg2): 松杆时目标按 vel_ramp 降到 0, 减速段仍算"有指令"不积位移, 车停稳才开始积 */
-    {
-        float vel_cmd = cmd->vel * machine->lqr.vel_max;
-        if (lqr_debug.vel_ramp > 0.0f)
-        {
-            float step = lqr_debug.vel_ramp * dt;
-            st->vel_tgt = clampf(vel_cmd, st->vel_tgt - step, st->vel_tgt + step);
-            if (fabsf(st->vel_tgt) < step) { st->vel_tgt = 0.0f; }   /* 收口到精确 0 */
-        }
-        else
-        {
-            st->vel_tgt = vel_cmd;
-        }
-    }
-    st->target[LQR_X_DS]    = st->vel_tgt;
-    /* 转向沿用归一方向 */
+    st->vel_tgt            = cmd->vel;
+    st->target[LQR_X_DS]    = cmd->vel;
+    /* 转向保持朝向 */
     if (cmd->yaw != 0.0f)
     {
         st->yaw_tgt = st->x[LQR_X_PHI];
     }
     st->target[LQR_X_PHI]   = st->yaw_tgt;
-    st->target[LQR_X_DPHI]  = cmd->yaw * machine->lqr.yaw_max;
+    st->target[LQR_X_DPHI]  = cmd->yaw;
     st->target[LQR_X_THL]   = machine->lqr.leg_trim[0];
     st->target[LQR_X_DTHL]  = 0.0f;
     st->target[LQR_X_THR]   = machine->lqr.leg_trim[1];
@@ -176,6 +161,42 @@ uint8_t LQR_Target_Update(lqr_state_t *st, const rc_command_t *cmd, float dt)
         st->leg_len_tgt[i] = clampf(st->leg_len_tgt[i], len_min, len_max);
     }
     return 1u;
+}
+
+/* 消费速度结果 */
+void LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt)
+{
+    if (!isfinite(velocity))
+    {
+        st->valid = 0u;
+        return;
+    }
+    st->ds_kf = velocity;
+    st->x[LQR_X_DS] = lqr_debug.vel_src ? velocity : st->ds_lpf;
+    /* 位移积分: 有速度指令时清零并撤防; 目标回零后车速降到 pos_arm_vel 以下才开始积 (0 = 立即) */
+    if (st->target[LQR_X_DS] != 0.0f)
+    {
+        st->pos = 0.0f;
+        st->pos_armed = 0u;
+    }
+    else
+    {
+        if (!st->pos_armed
+            && (lqr_debug.pos_arm_vel <= 0.0f
+                || fabsf(st->x[LQR_X_DS]) < lqr_debug.pos_arm_vel))
+        {
+            st->pos_armed = 1u;
+        }
+        if (st->pos_armed)
+        {
+            st->pos += st->x[LQR_X_DS] * dt;
+        }
+    }
+    st->x[LQR_X_S] = st->pos;
+    if (!isfinite(st->pos) || !isfinite(st->x[LQR_X_DS]))
+    {
+        st->valid = 0u;
+    }
 }
 
 /* 状态估计: 每拍必算, 有效性写 st->valid 并返回 */
@@ -274,40 +295,14 @@ uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
     st->ds_raw = (vel[0] + vel[1]) * 0.5f;
     st->ds_lpf = Lowpass_Update(&st->lpf_vel, st->ds_raw);
     st->a_fwd  = lqr_debug.acc_fwd_sign * LQR_Accel_Forward(imu);
-    st->ds_kf  = Kalman_Accel_Update(&st->kf_vel, st->a_fwd, st->ds_raw, dt);
-    st->x[LQR_X_DS] = lqr_debug.vel_src ? st->ds_kf : st->ds_lpf;
-
-    /* 位移积分: 有速度指令时清零并撤防; 目标回零后车速降到 pos_arm_vel 以下才开始积 (0 = 立即) */
-    if (st->target[LQR_X_DS] != 0.0f)
+    if (!isfinite(st->ds_raw) || !isfinite(st->a_fwd))
     {
-        st->pos = 0.0f;
-        st->pos_armed = 0u;
-    }
-    else
-    {
-        if (!st->pos_armed
-            && (lqr_debug.pos_arm_vel <= 0.0f
-                || fabsf(st->x[LQR_X_DS]) < lqr_debug.pos_arm_vel))
-        {
-            st->pos_armed = 1u;
-        }
-        if (st->pos_armed)
-        {
-            st->pos += st->x[LQR_X_DS] * dt;
-        }
-    }
-    st->x[LQR_X_S] = st->pos;
-    {
-        for (i = 0u; i < LQR_X_NUM; i++)
-        {
-            if (!isfinite(st->x[i]))
-            {
-                return 0u;
-            }
-        }
+        return 0u;
     }
     st->valid = 1u;
-    return 1u;
+    st->ds_kf = Kalman_Accel_Update(&st->kf_vel, st->a_fwd, st->ds_raw, dt);
+    LQR_Velocity_Apply(st, st->ds_kf, dt);
+    return st->valid;
 }
 
 /* 增益求值 + 状态反馈求和 */

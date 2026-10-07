@@ -1292,6 +1292,11 @@
               <FilePath>../imcalib/Algorithm/gas_spring.c</FilePath>
             </File>
             <File>
+              <FileName>slip.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/Algorithm/slip.c</FilePath>
+            </File>
+            <File>
               <FileName>standup.c</FileName>
               <FileType>1</FileType>
               <FilePath>../imcalib/Algorithm/standup.c</FilePath>

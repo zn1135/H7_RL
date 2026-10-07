@@ -1,11 +1,26 @@
 # VOFA 采集与模式切换
 
-> 当前普通帧为39通道（ch0～38），用于四髋／FDCAN1中断诊断，已替换原LQR状态页。普通页需 `vofa_trace_requested=0`。下方38通道布局及周期通道覆盖表均为历史；策略追踪32通道帧保持原定义。
+> 当前作者已恢复LQR状态页，仍39通道（ch0～38），新增roll恢复观测如下。此前CAN诊断表已成为历史。普通页需 `vofa_trace_requested=0`。下方38通道布局及周期通道覆盖表均为历史；策略追踪32通道帧保持原定义。
 
 
 默认通过 UART8 发送普通 39 通道 JustFloat；USB CDC 留给 JID1。`vofa_transport.requested/active` 的 1 为 UART8、0 为 USB CDC。普通帧是 39 个小端 float32 与 `00 00 80 7F` 帧尾，共 160 字节；策略追踪仍为 32 通道、132 字节。
 
-## 当前四髋／FDCAN1诊断（39通道）
+## 当前LQR＋roll恢复观测
+
+ch0在线、ch1原使能／投入状态、ch2原RL／发送状态；ch3～12为LQR十维状态，ch13～22为十维目标，ch23～26为4路模型输出u，ch27为姿态分类、ch28为回正程度upright；ch29/30实际左右腿长，ch31/32实际左右几何角。
+
+| 通道 | 内容 | 单位 |
+|---|---|---|
+| ch33 | 原roll Euler[0] | rad |
+| ch34 | 自起roll_applied差动力 | N，左F加／右F减 |
+| ch35 | 自起roll_weight | 0～1，方向权重，不是接地状态 |
+| ch36 | 自起phase | 6伸腿、5上绕后摆、1收腿、2摆正、3交接／LQR、4失败；7等稳、8短腿调整、9翻身扫腿、10支撑回正 |
+| ch37 | 自起阶段elapsed | ms |
+| ch38 | 自起fault | 3姿态、4许可、2超时 |
+
+自起完全交给LQR后，ch34/35可能保留最后准备值，不代表正常LQR仍使用自起roll环；结合phase和原LQR投入位判断。当前任务不恢复作者移除的CAN页。普通仍JustFloat39通道，追踪32帧不改。
+
+## 历史四髋／FDCAN1诊断（39通道）
 
 仍在Robot_Control_Send_Vofa发送JustFloat、39通道、160字节；普通页vofa_trace_requested=0。不新增任务／发送入口，不改变控制器、1kHz节拍、离线时间或CAN配置。HAL状态查询只读协议／计数寄存器；硬件读取可能清除部分“自上次读取以来”诊断标志，不清发送队列、不重启总线，也不改现有恢复策略。
 
@@ -184,3 +199,6 @@ python tools/vofa_trace_decode.py vofa_capture.bin vofa_decoded_01
 
 
 最新流程6→5→1→2→3：先伸腿0.30m，再依入口world pitch选择上方路径到−1.3±0.3rad，再自起。目标、展开角可在Watch看standup_control；现有CAN诊断页ch36/37仍是环绕后的几何反馈，看到从+π跳到−π并不表示反转。首次已伸足或已在后摆区间允许跳过对应阶段。
+
+
+翻倒恢复：ch27姿态0正常／1翻倒／2侧躺／3非法；ch28 upright正立+1、倒置−1。新阶段7→8→9→10后直接进入原1／2→3。只有LQR自起模式允许fallen恢复；RL和硬故障不允许。侧躺暂零输出，不能把phase4/fault3理解成已支持侧躺动作。恢复时原LQR估计仍运行，u可能是旧候选，Watch看当前length_cmd／angle_cmd／force／tp，不能把模型u当最终髋命令。

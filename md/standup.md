@@ -1,10 +1,10 @@
 # 独立自起模块
 
-`imcalib/Algorithm/standup.c/h` 是唯一自起模块，沿原执行任务1kHz运行；不新增任务、反馈解算或通信入口。范围仍是机体基本水平、腿在前／后方的起立，完整倒置／侧翻恢复未开放。
+`imcalib/Algorithm/standup.c/h` 是唯一自起模块，沿原执行任务1kHz运行；不新增任务、反馈解算或通信入口。当前包含正立准备及俯仰翻倒／仰卧恢复第一轮试验；明显侧躺或混合大侧偏只分类后停止，尚未执行侧躺扶正。
 
 ## 公共输入与参数
 
-自起直接只读 `imu_state`、`leg_l`、`leg_r`；公共腿解算、轴映射、零点与极性保持。世界 `pitch_world/pitch_world_valid` 只判断是否需要自起、允许准备范围及回正到位；自起控制摆角改为公共几何腿角 `virtual_leg_angle`，摆角速度为对应 `d_virtual_leg_angle`，不再减原pitch／gyro。角度误差用最短路径环绕，没有额外反馈反号。
+自起只读执行层从 `imu_state`、`leg_l`、`leg_r` 复制的同一拍快照；公共腿解算、轴映射、零点与极性保持。世界 `pitch_world/pitch_world_valid` 只判断是否需要自起、允许准备范围及回正到位；自起控制摆角改为公共几何腿角 `virtual_leg_angle`，摆角速度为对应 `d_virtual_leg_angle`，不再减原pitch／gyro。角度误差用最短路径环绕，没有额外反馈反号。
 
 全局 `standup_param` 是一套公共自起参数，直接初始化，不再有大小机数组、machine_id选择、configured标志或ctx中的参数副本。两个机型共用该对象；原机器配置仍提供腿长辅助PD、站立目标、支撑前馈、机械范围及平台电机限幅，这些属于既有平台数据，本轮没有改它们。
 
@@ -52,7 +52,7 @@ DONE之前，Standup_Update输出准备力矩；本拍刚完成仍发最后一�
 
 交接只混合两个已包含补偿的最终候选：关节 `(1-blend)*prepare+blend*balance`，轮输出 `blend*balance`；交接期间根据当前反馈刷新准备控制，blend=1后停止准备计算，不重复补偿。故障或LQR候选无效同拍清输出并锁存。再次触发时，执行层本拍算出的平衡候选被准备输出覆盖，唯一分发口只发送最终选择的一份。
 
-世界pitch无效／IMU离线或超过1.4rad仍由原公共fallen门控失能，小于1.0rad解除，迟滞保留；自起没有绕过保护。自起自身失败保持零力矩，不另发失能命令。反馈恢复不清锁存；有效遥控退出右中、左下或切模式清本次状态。
+无效世界pitch／IMU离线归硬FAULT_IMU。有效pitch超过1.4rad仍置fallen、小于1.0rad解除；正常LQR／RL据此停止，自起模式开启recovery_enabled时按新恢复状态执行，硬故障保持停止。自起自身失败保持零力矩，不另发失能命令。反馈恢复不清锁存；有效遥控退出右中、左下或切模式清本次状态。
 
 ## 观测与验证
 
@@ -80,19 +80,28 @@ Wheelleg-big-lhx的IMCALIB/Tool/user_lib.c第178～181行：位置外环P14/I0/D
 
 ```c
 standup_param_t standup_param = {
+    .recovery_settle_time = 0.2f, .recovery_tuck_time = 0.1f,
+    .recovery_len = 0.16f, .recovery_support_len = 0.20f,
+    .recovery_len_rate = 0.3f, .recovery_angle_rate = 2.0f,
+    .recovery_force_max = 150.0f,
+    .recovery_support_pitch = 0.8f, .recovery_ready_pitch = 0.35f,
+    .recovery_ready_leg = 0.7f, .recovery_timeout = 4.0f,
+    .recovery_stall_time = 0.3f, .recovery_retry_max = 2u,
     .extend_len = 0.30f, .extend_tol = 0.01f, .extend_timeout = 4.0f,
-    .rear_angle = -1.3f, .rear_tol = 0.3f, .rear_timeout = 4.0f,
-    .rear_rate = 4.239f,
+    .rear_angle = -1.5f, .rear_tol = 0.3f, .rear_timeout = 4.0f,
+    .rear_rate = 4.8f,
     .retract_len = 0.15f, .retract_ready_len = 0.19f,
-    .angle_pos_kp = 25.0f, .angle_pos_kd = 0.0f,
-    .angle_speed_kp = 5.0f, .angle_speed_kd = 0.0f,
+    .angle_pos_kp = 25.0f, .angle_pos_kd = 20.0f,
+    .angle_speed_kp = 5.0f, .angle_speed_kd = 5.0f,
     .angle_speed_max = 10.0f,
     .tp_max = 40.0f,
+    .roll_force_max = 40.0f, .roll_force_rate = 10.0f,
+    .roll_ready = 0.3f,
     .trigger_angle = 50.0f * LEG_PI / 180.0f,
     .trigger_pitch = 40.0f * LEG_PI / 180.0f,
     .angle_tol = 0.3f, .length_tol = 0.04f,
-    .pitch_max = 1.0f, .roll_max = 0.75f,
-    .stable_time = 0.1f, .support_time = 0.3f, 
+    .pitch_max = 1.0f, .roll_max = 1.2f,
+    .stable_time = 0.1f, .support_time = 0.3f,
     .blend_time = 0.35f, .trigger_time = 0.1f,
     .timeout = {3.0f, 4.0f},
 };
@@ -181,3 +190,71 @@ rear_position通过每拍Wrap(本拍几何角−上一拍几何角)累计展开�
 作者要求仿照Leg3绕腿目标斜坡，新增rear_rate=4.239rad/s，对应参考每毫秒0.00314×1.35rad。Rear路径终点rear_goal仍按原入口world pitch锁定，方向和连续角反馈不改；初始化angle_cmd为实测几何角，每拍最多rear_rate×dt向展开终点推进，不一次跳到4.983rad。只改变REAR，原伸腿／收腿直接目标、SWING直接站立摆角、原补偿和交接保持。
 
 Rear到位同时要求展开实际角及推进后的目标角都距终点≤rear_tol，再保持原stable_time，防止目标尚未推进到终点就提前切段。作者当前将tp_max调为30N·m、速度目标上限调为6rad/s，本轮保留，不恢复40／10。正立从+0.5上绕到−1.3等效终点约4.983，目标推进约1.06秒（不代表实际到位时间）；可在Watch看angle_cmd／rear_position／rear_goal，CAN诊断页ch36/37为环绕几何反馈。
+
+
+## 双腿可支撑时的roll恢复（当前）
+
+作者确认常见姿态是明显侧偏但两腿仍能支撑。本轮在准备控制中增加独立roll PD，参数读取本机原LQR roll的P/D、强制Ki0，首拍预置历史；目标为原控制坐标roll=0（Euler[0]）。差动力方向沿用正常Leg_Balance：左F加、右F减，不改电机极性／零点。
+
+新增roll_force_max40N、roll_force_rate200N/s，先裁剪／渐变PD差动力，再乘roll_weight=min(max(cos(左几何角−world pitch),0),max(cos(右几何角−world pitch),0))。它只是腿方向权重，不是接地传感器；腿朝机体上方时为0，避免上绕时施加同样的差动力。roll_force是限速后的请求，roll_applied是实际加入左右F的差动力；两者单位N，不是虚拟Tp或单电机N·m。原雅可比、弹簧补偿及最终限幅保持。
+
+准备roll保护范围扩大为roll_max1.2rad（约69°），并新增roll_ready0.3rad作为SWING到LQR的到位要求，与原长度／摆角条件共同保持100ms；pitch交接门槛仍未恢复，pitch触发／保护及fallen门控保留。这版不执行90°侧躺或倒置恢复，不绕过CAN／电机硬故障。正常LQR仍使用原roll环，与自起PID历史独立。
+
+作者已将VOFA改回LQR状态页。现新增空闲ch33原roll、ch34 roll_applied（N）、ch35方向权重、ch36 phase、ch37阶段ms、ch38 fault；原LQR四输出为ch23～26，修正原6次读取4维数组越界。其他现行状态／目标／腿长／几何角布局保留，当前不是旧CAN39通道诊断页。
+
+
+## 2026-10-06 · 翻倒恢复第一版（当前）
+
+作者授权先收敛重复门控，再加入翻倒恢复。通信层汇总硬故障，world pitch无效／非有限属于FAULT_IMU；fallen只保持有效姿态的大俯仰检测，不再兼作输入失效标志。执行层Robot_Control_Enable_Allowed统一判使能，Control_Frame_Read每控制拍复制同一IMU、两腿、遥控和轮速，并生成drive／normal／recovery许可。正常LQR、RL仍不在fallen状态输出；LQR且自起／recovery_enabled开启时允许因姿态fallen进入恢复，CAN／电机／IMU／遥控硬故障仍拒绝。最终输出额外读取最新ctrl_fault／总开关一次，统一检查六路力矩有限性；不重新扫描设备。
+
+固定K表／机器几何／周期匹配的LQR_Gain_Compatible首次检查后缓存；纯LQR_Gain_Check接口保留，动态K求值结果仍逐次校验。机器与选中表是编译期只读配置；更换表／机器须重新编译重启。参数指针、雅可比有效和计算新结果的检查仍按模块契约保留，没有把数值异常当成姿态恢复。
+
+姿态从现有映射四元数计算upright（正立+1、倒置−1）和侧向重力幅值side，不改输入极性。较大俯仰／仰卧进入恢复；侧向分量过大仍标记SIDE，但不以此直接锁存停止；正立侧偏沿原自起路径并行纠偏，upright<0则进入翻倒恢复。未实现独立90°侧躺扶正动作。倒置Euler roll可能换分支，不用该值直接中断俯仰翻身；大姿态阶段也不套用正常Euler roll差动力。
+
+| phase | 动作 | 转段 |
+|---|---|---|
+| 7 SETTLE | 目标追平实测、受限补偿／角速度阻尼；轮零 | 默认0.2s后TUCK |
+| 8 TUCK | 保持进入几何角，长度目标限速向recovery_len推进（现为伸腿目标） | 按recovery_tuck_time后FLIP，不等待长度到位 |
+| 9 FLIP | 两腿沿几何正方向、连续角目标2rad/s推进，继续缓慢调到短腿目标 | 身体进入支撑窗口、两腿世界角都在窗口，保持后SUPPORT |
+| 10 SUPPORT | 扫腿停止，几何目标限速归到站立目标，长度目标缓慢向0.20m建立支撑 | 世界pitch≤0.35rad、roll≤原roll_ready、两腿世界摆角≤0.7rad保持后转原RETRACT／SWING |
+
+
+FLIP进入支撑窗口使用pitch≤0.8rad、roll≤0.3rad、两腿世界角≤0.7rad和upright>0；有效保持期间冻结扫腿目标，避免继续推过窗口。机械卡住只有在角目标误差>0.5rad、反馈角速度<0.1rad/s且回正程度没有改善时计时，0.3s后回TUCK重贴实测再尝试。目标累计扫满2π或每阶段超过4s也有限重试，默认两次重试；不是无限加力。硬故障期间不重试；反馈恢复且许可连续成立后才允许有限重启。重试耗尽或阶段配置错误仍需退出投入位置复位。
+
+新恢复阶段虚拟控制F另限±150N，Tp沿原40N·m，最终电机原限幅；气弹簧补偿仍只加一次。roll纠偏在各阶段并行计算，只在upright>0时应用，沿用腿支撑方向权重；倒置时不使用存在分支歧义的Euler roll差动力。长度／角目标每阶段贴实测并预置D历史。正常正立的6→5→1→2→3流程与用户当前25/20→5/5、后摆−1.5、4.8rad/s、roll力速率10N/s均保持。
+
+翻身后不重走伸0.30／上绕，直接原收腿／摆正，随后原0.35s输出渐变接LQR；接管事件重置受翻身拖地污染的LQR估计器及目标，保存并恢复lqr_debug运行时设置，不改变其符号／调试限幅。recovery_enabled默认1，失能时设0可退回原翻倒失能路径；普通standup.enabled开关保留。
+
+当前39通道：ch27为姿态分类（0正常、1翻倒、2侧躺、3非法），ch28为upright；ch36 phase可见7～10，ch37阶段ms、ch38 fault；原几何角ch31/32、实际长度ch29/30、roll及差动力ch33/34保持。现LQR状态页在恢复时属于持续估计／旧候选，不能把ch23～26当作恢复实际力矩，目标与F/Tp可Watch读取standup_control。
+
+逻辑测试只用脚本反馈推动姿态窗口，确认模式／阶段／故障与输出规则，不代表机体已经物理翻回。真实碰撞、侧躺、单向扫腿效果和控制预算仍待台架。
+
+
+## 2026-10-06 并行纠偏与有限重试
+
+不新增阶段或VOFA通道。DONE（含渐入）中的腿摆角、世界pitch或roll持续超出对应trigger阈值后重新自起，取消运动命令必须归零的限制。恢复路径轮组输出为零，运动命令不参与准备阶段；正常LQR输入、K表与物理映射不改。roll仍通过现有左右F差动力和统一雅可比分解，腿未到后点也计算；支撑权重为零时不强行产生纠偏力，不能保证无接触侧躺回正。
+
+FAILED中输入有效且permit连续成立retry_wait后，重贴实测目标、预置PID历史并重新按当前姿态选路径。每轮成功平衡前共用recovery_retry_max预算，跨Reset和转段保留；超时、短暂输入中断或门控中断可有限重试，BAD_CONFIG与耗尽预算保持停止。硬故障仍由唯一公共许可禁止输出，故障消失后才计等待时间；失败等待期间统一零输出，不清除驱动故障。正常DONE渐入完成且姿态无恢复请求时清除重试计数。allow_restart接口参数保留兼容，当前不再限制姿态恢复。
+
+并行纠偏幅值／速率保持作者现值，本次未调PID。仅脚本反馈和编译核验，侧偏纠正能力、碰撞与翻倒动作须实测。
+
+
+2026-10-06 参数排版：standup_param分组排列，每项单行标注单位。逐项核对保持文件最新字段和值，不改控制逻辑。
+
+
+2026-10-06 速度观测互锁：只有LQR投入且自起DONE（或自起模块关闭）时更新速度KF和打滑确认；自起中暂停惯性预测及轮速修正，避免悬空轮速污染交接。交接使用零速先验而非空转轮速；这是受限先验，不保证机体仍滑动时立即准确。100ms只屏蔽打滑标志，观测降权始终生效。原恢复LQR全状态初始化后再应用同样交接规则。
+
+
+2026-10-06 解耦：速度互锁转到task_actuation的Control_State_Update，独立slip.c实现融合、标志及重置。LQR仅组装原观测与消费任务赋入的速度，旧LQR_Velocity_Mode接口已移除；交接含义不变。
+
+
+2026-10-07：作者观察短腿不能形成有效撑翻力臂，指定翻倒恢复recovery_len改为0.30m，recovery_tuck_time注释改为伸腿。字段与阶段名TUCK保留兼容；定时转段不变，伸腿0.1s后开始扫腿，FLIP中长度继续限速伸向0.30m，并非实测伸到0.30m才扫腿。SUPPORT仍采用原recovery_support_len，正立自起retract_len与其余参数未改。
+
+
+2026-10-07：按作者要求移除recovery_len_rate。SETTLE仍追平实测；伸腿准备/TUCK与FLIP直接给机械区间夹紧后的recovery_len，SUPPORT直接给recovery_support_len。摆角目标限速、0.1s定时转段、PD历史预置和原限幅保持，目标直给不代表实测伸到位才扫腿。
+
+
+2026-10-07：按作者确认移除SUPPORT阶段与recovery_support_len/recovery_support_pitch。FLIP在原回正窗口（世界pitch<=0.8rad、正立侧、roll和世界腿角到位）持稳后直接按实测腿长/后点选择原EXTEND/REAR/RETRACT/SWING；保留recovered事件，正常LQR接入仍重置估计。唯一回正pitch参数recovery_ready_pitch沿用原FLIP的0.8rad窗口，不再额外等待旧SUPPORT的0.35rad。无0.20m过渡目标；普通起立retract_len保持原值。
+
+
+2026-10-07：翻身退出不再要求左右腿世界角接近平衡方向，删除recovery_ready_leg。仅正立侧、世界pitch回正窗口、原roll_ready与stable_time确认；退出后原正常起立流程按实际腿位置选择准备动作。后点rear_angle及公共几何解算未改。

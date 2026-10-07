@@ -7,6 +7,7 @@
 #include "joint_usb.h"
 #include "gas_spring.h"
 #include "standup.h"
+#include <math.h>
 
 /*
  * 输出任务三层结构 (作者 2026-09-22 定: 解算只算, 分发唯一):
@@ -19,8 +20,54 @@
 static uint8_t lqr_running;     /* 已投入 */
 static uint8_t rl_engaged;      /* RL 已投入 */
 static uint8_t rl_wait_ticks;   /* 执行分频 */
+typedef struct {
+    imu_state_t imu;
+    leg_state_t left;
+    leg_state_t right;
+    rc_command_t rc;
+    float wheel_vel[2];
+    uint8_t drive;
+    uint8_t normal;
+    uint8_t recovery;
+} control_frame_t;
+
+static control_frame_t control_frame;
 volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
+
+/* 统一使能许可 */
+uint8_t Robot_Control_Enable_Allowed(void)
+{
+    uint8_t recovery;
+
+    if (JointUsb_ModeLock())
+    {
+        return (uint8_t)(!gas_spring_only_enabled && JointUsb_EnableAllowed());
+    }
+    recovery = (uint8_t)(standup_control.enabled && standup_control.recovery_enabled
+        && rc_command.online && rc_command.s1 == DR16_SW_MID
+        && rc_command.s2 == DR16_SW_MID);
+    return (uint8_t)(robot_state.rc_enable && rc_command.online
+        && ctrl_fault == FAULT_NONE && (!robot_state.fallen || recovery));
+}
+
+/* 本拍快照与许可 */
+static void Control_Frame_Read(void)
+{
+    taskENTER_CRITICAL();
+    control_frame.imu = imu_state;
+    control_frame.left = leg_l;
+    control_frame.right = leg_r;
+    control_frame.rc = rc_command;
+    control_frame.wheel_vel[0] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
+    control_frame.wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
+    control_frame.drive = (uint8_t)(Robot_Control_Enable_Allowed()
+        && robot_state.motor_enabled && torque_output_enabled);
+    control_frame.normal = (uint8_t)(control_frame.drive && !robot_state.fallen);
+    control_frame.recovery = (uint8_t)(control_frame.drive && standup_control.enabled
+        && control_frame.rc.s1 == DR16_SW_MID && control_frame.rc.s2 == DR16_SW_MID);
+    taskEXIT_CRITICAL();
+}
 
 /* 输出初始化 */
 void output_task_init(void)
@@ -51,7 +98,22 @@ static void output_dispatch(const torque_output_t *torque)
     uint8_t i;
 
     applied = *torque;
-    if (!applied.valid || !torque_output_enabled)
+    for (i = 0u; i < DM_MOTOR_NUM; i++)
+    {
+        if (!isfinite(applied.dm[i]))
+        {
+            applied.valid = 0u;
+        }
+    }
+    for (i = 0u; i < DJI_MOTOR_NUM; i++)
+    {
+        if (!isfinite(applied.dji[i]))
+        {
+            applied.valid = 0u;
+        }
+    }
+    if (!applied.valid || !control_frame.drive || ctrl_fault != FAULT_NONE
+        || !torque_output_enabled)
     {
         for (i = 0u; i < DM_MOTOR_NUM; i++)
         {
@@ -85,7 +147,7 @@ uint8_t strategy_rc_enable(const rc_command_t *cmd)
 {
     if (cmd == NULL || !cmd->online)
     {
-        return 0u; 
+        return 0u;
     }
     if (gas_spring_only_enabled)
     {
@@ -132,24 +194,37 @@ static ctrl_strategy_t strategy_from_remote(const rc_command_t *cmd)
     return CTRL_STRATEGY_DISABLE;
 }
 
+/* 原速度估计 */
+static void Control_State_Update(void)
+{
+    (void)LQR_State_Update(&lqr_state, &control_frame.imu,
+        &control_frame.left, &control_frame.right,
+        control_frame.wheel_vel, MACHINE_LQR_DT);
+}
+
 /* LQR 投入锁存 */
 static uint8_t lqr_engage_update(void)
 {
     uint8_t ready;
+    lqr_debug_t saved_debug;
 
-    ready = (uint8_t)(robot_state.motor_enabled
-                      && ctrl_fault == FAULT_NONE && !robot_state.fallen
-                      && robot_state.rc_enable && rc_command.online
-                      && imu_state.online
-                      && leg_l.output.valid && leg_r.output.valid);
+    ready = (uint8_t)(control_frame.normal && lqr_state.valid);
     if (!ready)
     {
         lqr_running = 0u;
     }
     else if (!lqr_running)
     {
+        if (standup_control.recovered)
+        {
+            saved_debug = lqr_debug;
+            LQR_Init(&lqr_state);
+            lqr_debug = saved_debug;
+            Control_State_Update();
+            standup_control.recovered = 0u;
+        }
         /* 使能沿: 锁腿长目标 (不查实测腿长, 同 Leg2) */
-        lqr_running = LQR_Enable_Latch(&lqr_state, &leg_l, &leg_r);
+        lqr_running = LQR_Enable_Latch(&lqr_state, &control_frame.left, &control_frame.right);
         if (lqr_running)
         {
             Leg_Balance_Reset(&leg_balance);
@@ -174,10 +249,8 @@ static void solve_gas_spring(torque_output_t *torque)
     float limit;
     uint8_t i;
 
-    if (!(robot_state.rc_enable && robot_state.motor_enabled
-          && rc_command.online && rc_command.s1 == DR16_SW_UP
-          && rc_command.s2 == DR16_SW_MID)
-        || !Gas_Spring_Apply(&leg_l, &leg_r, base_dm, raw_dm))
+    if (!control_frame.normal
+        || !Gas_Spring_Apply(&control_frame.left, &control_frame.right, base_dm, raw_dm))
     {
         return;
     }
@@ -192,7 +265,7 @@ static void solve_gas_spring(torque_output_t *torque)
 /* LQR 平衡: 目标 → 状态反馈 → 腿部力控 */
 static void solve_lqr(torque_output_t *torque)
 {
-    if (!LQR_Target_Update(&lqr_state, &rc_command, MACHINE_LQR_DT))
+    if (!LQR_Target_Update(&lqr_state, &control_frame.rc, MACHINE_LQR_DT))
     {
         return;
     }
@@ -205,7 +278,7 @@ static void solve_lqr(torque_output_t *torque)
     {
         return;
     }
-    torque->valid = Leg_Balance_Compute(&leg_balance, &lqr_state, &leg_l, &leg_r,
+    torque->valid = Leg_Balance_Compute(&leg_balance, &lqr_state, &control_frame.left, &control_frame.right,
                                         MACHINE_LQR_DT, torque);
 }
 
@@ -213,22 +286,17 @@ static void solve_lqr(torque_output_t *torque)
 static void solve_lqr_standup(torque_output_t *torque)
 {
     uint8_t permit;
-    uint8_t allow_restart;
     uint8_t route;
     uint8_t was_done;
 
-    permit = (uint8_t)(robot_state.motor_enabled && robot_state.rc_enable
-        && rc_command.online && ctrl_fault == FAULT_NONE && !robot_state.fallen
-        && imu_state.online && torque_output_enabled);
-    allow_restart = (uint8_t)(rc_command.vel == 0.0f && rc_command.yaw == 0.0f
-        && rc_command.len == 0.0f);
+    permit = control_frame.recovery;
     was_done = (uint8_t)(standup_control.phase == STANDUP_DONE);
     if (was_done && permit && lqr_engage_update())
     {
         solve_lqr(torque);
     }
-    route = Standup_Update(&standup_control, &imu_state, &leg_l, &leg_r,
-        permit, allow_restart, MACHINE_LQR_DT, torque);
+    route = Standup_Update(&standup_control, &control_frame.imu, &control_frame.left, &control_frame.right,
+        permit, 1u, MACHINE_LQR_DT, torque);
     if (route == STANDUP_ROUTE_BALANCE)
     {
         if (!was_done)
@@ -258,13 +326,7 @@ static void solve_lqr_standup(torque_output_t *torque)
 /* RL: 动作 → 力矩; 前提: 遥控使能 + 电机使能 + 两腿有效 + 推理动作可用 */
 static void solve_rl(const float wheel_vel[2], torque_output_t *torque)
 {
-    if (!(robot_state.rc_enable && robot_state.motor_enabled
-          && leg_l.output.valid && leg_r.output.valid
-          && action_state.rl_ready))
-    {
-        return;
-    }
-    if (RL_Torque_Compute(&leg_l, &leg_r,
+    if (RL_Torque_Compute(&control_frame.left, &control_frame.right,
         &rl_control.torque_param[rl_control.policy.selected_model],
         wheel_vel, action_state.a, &rl_control.torque_state, torque) == 0u)
     {
@@ -297,18 +359,19 @@ void output_task_body(void)
     previous_start_us = start_us;
 #endif
 
-    wheel_vel[0] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
-    wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
+    Control_Frame_Read();
+    wheel_vel[0] = control_frame.wheel_vel[0];
+    wheel_vel[1] = control_frame.wheel_vel[1];
 
-    /* 1 估计: 每拍必算 (同 RL 观测) */
+    /* 1 估计与融合 */
     if (LQR_Gain_Compatible())
     {
-        (void)LQR_State_Update(&lqr_state, &imu_state, &leg_l, &leg_r, wheel_vel, MACHINE_LQR_DT);
+        Control_State_Update();
     }
 
     /* 2 求解: torque 默认全零 valid=0, 只有走通的分支才置 valid */
     Torque_Output_Clear(&torque);
-    strategy = strategy_from_remote(&rc_command);
+    strategy = strategy_from_remote(&control_frame.rc);
     ctrl_strategy = strategy;
     if (!standup_control.enabled || gas_spring_only_enabled || JointUsb_ModeLock()
         || (rc_command.online && (rc_command.s1 != DR16_SW_MID
@@ -353,11 +416,9 @@ void output_task_body(void)
 
     case CTRL_STRATEGY_RL:
         lqr_running = 0u;
-        rl_engaged = (uint8_t)(rc_command.s2 == DR16_SW_MID && robot_state.motor_enabled
-                               && robot_state.rc_enable && rc_command.online
-                               && ctrl_fault == FAULT_NONE && !robot_state.fallen);
+        rl_engaged = (uint8_t)(control_frame.normal && control_frame.rc.s2 == DR16_SW_MID);
         if (rl_engaged && action_state.rl_ready
-            && leg_l.output.valid && leg_r.output.valid && torque_output_enabled)
+            && control_frame.left.output.valid && control_frame.right.output.valid)
         {
             if (rl_wait_ticks == 0u)
             {

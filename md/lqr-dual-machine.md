@@ -8,6 +8,8 @@
 
 `machine_cfg_t.lqr` 保存投入目标、遥控量程、滤波/卡尔曼、腿长和横滚 PID、支持力前馈。参数数值以 `machine_config.c` 为准；大机器 PID 和支持力是台架候选，不是实测结果。大机器 D 项按 Leg3 的误差差分口径，从参考周期换算到本机周期；小机器保持旧值。
 
+遥控目标：`Rc_Command_Update` 对 ch1/ch0 做死区、夹 raw 后 `/660 × machine->lqr.vel_max/yaw_max`，`vel/yaw` 分别为 m/s、rad/s。当前 yaw 使用 ch0（右摇杆 X），命令负号沿用旧 yaw；`ang` 已删除，wheel 继续调腿长。LQR 不重复乘上限，速度命令斜坡已删除，vel/yaw 直接写目标，松杆速度目标当拍归零；朝向锁存、停车位移环及腿长积分保留。RL 消费端换回归一量后使用自己的训练范围。完整输入链见 [DBUS](DBUS.md)。
+
 电机极性、零点、IMU 映射、MIT 刻度、镜像和解算符号保持原值。轮半径由作者确认后从原占位值更新，记录见 `sysid-change-map.md`。
 
 ## K 表契约
@@ -15,6 +17,8 @@
 `lqr_gain_small.c`、`lqr_gain_big.c` 是各机器的生成物。`lqr_gain_table.c/h` 是公共入口，不再被 MATLAB 覆盖。`LQR_Gain_Info()` 返回编译选定表，`LQR_Gain_Check()` 校验机型、状态/输入版本、周期、轮径、杆长、拟合域和初始腿长，`LQR_Ready()` 同时检查配置投入许可。
 
 状态序为 `[s ds phi dphi thL dthL thR dthR pitch dpitch]`，s/ds 指髋轴中点位置/速度；输入序为 `[左轮 右轮 左虚拟髋 右虚拟髋]`。K 平展顺序为 `K[state*4+output]`。公共接口支持表内平衡状态/力矩偏置，当前上交五方程表为零；目标 trim 单独在机器配置中。
+
+`machine_config.c` 大机器 `.lqr` 已补参数注释，`tools/matlab/run_all.m` 列出 Q/R 每项的物理量和单位。配置中的左右数组按左/右排序；`leg_trim` 是世界系腿摆角目标，区别于测量零位 `leg_off_phi0`。低通数组按前向速度、俯仰角速度、偏航角速度排序，alpha 越大越跟随本拍输入。速度 KF 的 `kf_q` 为每拍累加的过程方差，`kf_r` 为速度观测方差。`pos_arm_vel` 为速度目标回零后允许位移积分的实际速度门槛，非正时立即允许。腿长与横滚 PID 按 Kp、Ki、Kd、输出限幅、积分限幅排列，输出为 N；当前 D 项使用每拍误差差分，未除周期。横滚补偿一侧加、一侧减；关闭 `hip_enable` 仅清 LQR 摆腿力矩，关闭 `len_pid_enable` 后仍保留支撑前馈。
 
 两个表都由旧上交模型经髋轴坐标变换后设计；2026-10-04 起腿摆角与角速度统一采用前摆为正，输入状态版本为 HIP_FRONT_V2。小机器 K 因口径对齐而改变；`lqr_debug.legacy_gain=1` 可沿同一算法使用原小机器表做 A/B，默认 0。该对照仅复现历史行为，不代表旧表满足新版状态契约或具有新版闭环验证结果；大机器不接受 legacy 标志。历史系数保存在 `tools/matlab/baseline/`，基线控制源保存在 `tests/fixtures/`。
 
@@ -131,3 +135,19 @@ RL 只读检查确认：`RL_Joint_Map` 使用机器 `rl.sign` 和训练角色变
 作者要求自起单独做模块，按是否需要起立设置自身标志，完成后再切原 LQR。独立 `standup.c/h` 已接入执行层，状态、参数与最终输出交接均属于自起模块；现有 LQR／腿长 PID／机器配置／K 表／通信门控没有因此改动。默认实验开关关闭；开启后已站直直接平衡，需自起则先准备，完成后调用原投入接口再渐进交接最终力矩。操作、起立判据及模块边界见 [standup.md](standup.md)。
 
 2026-10-05按作者确认精简为一套公共standup_param，复用机器已有长度辅助PD，摆角位置外环＋速度内环，Ki全部0；SUPPORT并入摆腿，重复active/done和机器参数副本删除，输出渐变收进Update。当前状态码0等待／1收腿／2摆腿／3完成／4失败，准备目标与平衡PID历史独立；默认仍关闭，最新契约及测试范围见上述模块文档。
+
+
+## 2026-10-06 独立打滑融合模块
+
+实现集中在Algorithm/slip.c，slip.h只提供参数、状态与Reset/Update接口，不依赖机器表、LQR、IMU或电机。通用kalman.c/h恢复普通KF功能；LQR结构不保存打滑状态。
+
+任务Control_State_Update先调用LQR_State_Update组装ds_raw与a_fwd，再按模式、总许可及自起DONE决定是否调用Slip_Update。输入为轮腿运动学速度、水平前向加速度、dt和机器KF噪声参数；输出融合速度，任务通过LQR_Velocity_Apply赋到ds_kf、选入x[DS]并沿原条件积入位置。当前默认vel_src=1；0保留低通A/B，不享受抗滑作用。状态估计API分为组装与消费，其他调用方若直接调用LQR_State_Update也须随后赋速度。
+
+Slip_Update内部按零速先验初始化，先IMU预测再计算新息，超出max(gate_min,gate*sqrt(P+R))时按比值平方临时放大观测噪声。修正和检测一次完成；持续异常置suspected，较低门限持稳后清除。slip_param集中列出σ门限、最低门限(m/s)、确认/恢复/屏蔽时间(s)、恢复比例。gate=0为普通融合并清除疑似标志。
+
+任务持有slip_control；自起中不调用Update，Reset清除旧状态，ds_kf填零。重接入时零速先验重建，blank只屏蔽标志，降权立即生效。零速非实测速度，移动交接须实测。标志不触发力矩缩放、失能或自起，姿态发散沿standup处理。初版仅均值速度、无偏置状态，差动抵消打滑与持续惯性漂移仍有限制。
+
+没有新任务或VOFA通道；Keil登记slip.c，eIDE按现有Algorithm源目录收集。
+
+
+2026-10-06 当前投入回退：按作者要求暂停打滑模块。执行任务不再调用Slip_Update/Reset；LQR_State_Update内恢复普通Kalman_Accel_Update与原vel_src选择、位置积分，各模式持续估计，不再自起阶段清零／屏蔽。slip.c/h与Keil登记暂保留，未接入执行链。后续重新启用需明确授权。

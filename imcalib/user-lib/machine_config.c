@@ -9,26 +9,38 @@ const machine_spring_cfg_t machine_spring_leg3 = {
 /* 两份电机配置表: 换机器改 machine_config.h 的 MACHINE_DEFAULT */
 const machine_cfg_t machine_table[MACHINE_NUM] = {
     [MACHINE_ID_BIG_WHEELLEG] = {
-        .name           = "big_wheelleg",
+        .name           = "big_wheelleg",             /* 大轮腿 */
         /* 匹配表已接入，控制待台架。 */
         .lqr_configured = 1u,
-        .spring = &machine_spring_leg3,
+        .spring = &machine_spring_leg3,               /* 气弹簧表 */
         .lqr = {
-            .dt = 0.001f,
-            .leg_len_init = {0.15f, 0.15f},
-            .leg_trim = {-0.06f, -0.06f},
-            .pitch_trim = 0.0f, .pos_target = 0.0f,
-            .vel_max = 3.0f, .yaw_max = 5.0f, .len_rate = 0.3f,
-            .vel_ramp = 5.0f, .pos_arm_vel = 0.0f,
+            .dt = 0.001f,                            /* 周期 s */
+            .leg_len_init = {0.15f, 0.15f},           /* 初始腿长 m */
+            .leg_trim = {-0.06f, -0.06f},             /* 摆角目标 rad */
+            .pitch_trim = 0.0f,                      /* 俯仰目标 rad */
+            .pos_target = 0.0f,                      /* 位移目标 m */
+            .vel_max = 3.0f,                         /* 速度上限 m/s */
+            .yaw_max = 5.0f,                         /* 转速上限 rad/s */
+            .len_rate = 0.3f,                        /* 腿长速率 m/s */
+            .pos_arm_vel = 0.0f,                     /* 积分门槛 m/s */
+            /* 低通顺序: 前向速度 / 俯仰角速度 / 偏航角速度 */
             .lpf_alpha = {0.3f, 0.3f, 0.3f},
-            .kf_p0 = 0.1f, .kf_q = 0.007f, .kf_r = 0.01f, .kf_p_max = 0.5f,
+            .kf_p0 = 0.1f,                           /* 初始方差 */
+            .kf_q = 0.007f,                          /* 过程方差 */
+            .kf_r = 0.01f,                           /* 观测方差 */
+            .kf_p_max = 0.5f,                        /* 方差上限 */
+            /* PID 顺序: Kp / Ki / Kd / 输出限幅 / 积分限幅; 输出单位 N */
             .leg_len = {{800.0f, 0.0f, 20000.0f, 5000.0f, 0.0f},
-                        {800.0f, 0.0f, 20000.0f, 5000.0f, 0.0f}},
-            .roll = {500.0f, 0.0f, 100.0f, 5000.0f, 0.0f},
-            .support_force = {20.534f * 9.81f * 0.5f, 20.534f * 9.81f * 0.5f},
-            .vel_src = 1u, .yaw_hold = 1u, .yaw_rate_hold = 1u,
-            .pos_hold = 1u, .wheel_enable = 1u, .hip_enable = 1u,
-            .len_pid_enable = 1u,
+                        {800.0f, 0.0f, 20000.0f, 5000.0f, 0.0f}}, /* 左右腿长 */
+            .roll = {500.0f, 0.0f, 100.0f, 5000.0f, 0.0f}, /* 横滚补偿 */
+            .support_force = {20.534f * 9.81f * 0.5f, 20.534f * 9.81f * 0.5f}, /* 支撑前馈 N */
+            .vel_src = 1u,                           /* 0低通1KF */
+            .yaw_hold = 1u,                          /* 偏航角环 */
+            .yaw_rate_hold = 1u,                     /* 偏航角速环 */
+            .pos_hold = 1u,                          /* 位移环 */
+            .wheel_enable = 1u,                      /* 轮矩输出 */
+            .hip_enable = 1u,                        /* 摆腿矩输出 */
+            .len_pid_enable = 1u,                    /* 腿长PID */
         },
         .dji_type       = 1u,                          /* M3508 + C620 */
         .dji_gear_ratio = 15.5f,                       /* 转子→轮子总减速比 */
@@ -49,9 +61,9 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
         /* 腿几何: 杆长 0.21/0.25; 腿长区间为实测工作区间 */
         .leg_lu         = 0.21f,
         .leg_lg         = 0.25f,
-        .leg_len_min    = 0.14f,
+        .leg_len_min    = 0.13f,
         .leg_len_max    = 0.34f,
-        .leg_off_phi0   = {-0.13f, -0.07f},
+        .leg_off_phi0   = {-0.0f, -0.0f},
         .gas_spring_force_n = {150.0f, 150.0f},
         .gas_comp_sign = {0, 0},                     /* 左右符号待台架 */
         /* IMU 轴映射待台架核对 */
@@ -86,7 +98,7 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
             .leg_trim = {-0.04f, -0.04f},
             .pitch_trim = 0.0f, .pos_target = 0.10f,
             .vel_max = 1.2f, .yaw_max = 5.0f, .len_rate = 0.3f,
-            .vel_ramp = 5.0f, .pos_arm_vel = 0.0f,
+            .pos_arm_vel = 0.0f,
             .lpf_alpha = {0.3f, 0.3f, 0.3f},
             .kf_p0 = 0.1f, .kf_q = 0.007f, .kf_r = 0.01f, .kf_p_max = 0.5f,
             .leg_len = {{2500.0f, 0.0f, 10000.0f, 5000.0f, 0.0f},

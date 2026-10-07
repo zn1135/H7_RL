@@ -137,6 +137,7 @@ extern osSemaphoreId ctrl_tick_sem_handle;
 extern osSemaphoreId policy_tick_sem_handle;
 
 void Robot_Control_Init(void);
+uint8_t Robot_Control_Enable_Allowed(void);
 void Action_State_Clear(void);
 /* TIM6 节拍分频: 每 MACHINE_POLICY_DIV 拍释放策略节拍 (ISR 调用) */
 void Policy_Tick_Div(void);

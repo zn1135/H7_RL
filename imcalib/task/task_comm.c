@@ -108,7 +108,7 @@ static void Robot_Fault_Update(void)
             motors_ok = 0u;
         }
     }
-    if (!imu_state.online)
+    if (!imu_state.online || !imu_state.pitch_world_valid || !isfinite(imu_state.pitch_world))
     {
         fault |= FAULT_IMU;
     }
@@ -152,13 +152,15 @@ static void Robot_Fault_Update(void)
 static void Robot_Fallen_Update(void)
 {
     float pitch_abs;
-    uint8_t pitch_valid;
 
+    if (ctrl_fault & FAULT_IMU)
+    {
+        return;
+    }
     taskENTER_CRITICAL();
     pitch_abs = fabsf(imu_state.pitch_world);
-    pitch_valid = (uint8_t)(imu_state.online && imu_state.pitch_world_valid);
     taskEXIT_CRITICAL();
-    if (!pitch_valid || !isfinite(pitch_abs) || pitch_abs > 1.4f)
+    if (pitch_abs > 1.4f)
     {
         robot_state.fallen = 1u;
     }
@@ -173,12 +175,7 @@ static void Robot_Enable_Update(void)
 {
     uint8_t enable_request;
 
-    enable_request = (uint8_t)(robot_state.rc_enable
-        && ctrl_fault == FAULT_NONE && !robot_state.fallen);
-    if (JointUsb_ModeLock())
-    {
-        enable_request = (uint8_t)(!gas_spring_only_enabled && JointUsb_EnableAllowed());
-    }
+    enable_request = Robot_Control_Enable_Allowed();
     if (enable_request && !robot_state.motor_enabled)
     {
         robot_state.motor_enabled = 1u;
@@ -261,7 +258,7 @@ static void Robot_Control_Send_Vofa(void)
     {
         dbg[i + 13] = lqr_state.target[i];
     }
-    for(int i = 0;i<6;i++)
+    for(int i = 0;i<LQR_U_NUM;i++)
     {
         dbg[i + 23] = lqr_state.u[i];
     }
@@ -269,6 +266,8 @@ static void Robot_Control_Send_Vofa(void)
     // {
         // dbg[i + 29] = motor_state.dji.vel_rad_s[i];
     // }
+    dbg[27] = lqr_state.leg_len_tgt[0];
+    dbg[28] = lqr_state.leg_len_tgt[1];
     dbg[29] = leg_l.output.virtual_leg_length;
     dbg[30] = leg_r.output.virtual_leg_length;
     dbg[31] = leg_l.output.virtual_leg_angle;
@@ -300,11 +299,12 @@ void comm_task_body(void)
     Dji_Parse();
     Motor_State_Update();
     Leg_State_Update();
+
     WS2812_RainbowBlink();
     Remote_Control_Update();
     JointUsb_Process();
-    Robot_Fallen_Update();
     Robot_Fault_Update();
+    Robot_Fallen_Update();
     Robot_Enable_Update();
     JointUsb_Pump();
     /* 策略追踪与普通 VOFA 同口互斥 */
@@ -317,4 +317,9 @@ void comm_task_body(void)
     {
         Robot_Control_Send_Vofa();
     }
+    
+    // Dm_Send_Command(0, DM_CMD_SET_ZERO);
+    // Dm_Send_Command(1, DM_CMD_SET_ZERO); 
+    // Dm_Send_Command(2, DM_CMD_SET_ZERO);
+    // Dm_Send_Command(3, DM_CMD_SET_ZERO); 
 }

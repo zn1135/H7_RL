@@ -1,4 +1,5 @@
 #include "rc_command.h"
+#include "machine_config.h"
 
 /* 死区 + 限幅 → [-1,1] */
 static float Rc_Axis(int16_t raw, uint16_t deadband)
@@ -25,16 +26,14 @@ void Rc_Command_Update(rc_command_t *cmd, const dr16_t *rc)
         cmd->vel = 0.0f;
         cmd->yaw = 0.0f;
         cmd->len = 0.0f;
-        cmd->ang = 0.0f;
         cmd->s1 = 0u;
         cmd->s2 = 0u;
         cmd->online = 0u;
         return;
     }
-    cmd->vel = Rc_Axis(rc->ch1, RC_DEADBAND_VEL);
-    cmd->yaw = -Rc_Axis(rc->ch0, RC_DEADBAND_YAW);
+    cmd->vel = Rc_Axis(rc->ch1, RC_DEADBAND_VEL) * machine->lqr.vel_max;
+    cmd->yaw = -Rc_Axis(rc->ch0, RC_DEADBAND_YAW) * machine->lqr.yaw_max;
     cmd->len = Rc_Axis(rc->wheel, RC_DEADBAND_LEN);
-    cmd->ang = Rc_Axis(rc->ch3, RC_DEADBAND_ANG);
     cmd->s1 = rc->s1;
     cmd->s2 = rc->s2;
     cmd->online = 1u;

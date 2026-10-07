@@ -650,3 +650,8 @@ motor_state.dji.vel_rad_s          rc_command (commTask 已解算)
 **符号责任**：反馈极性按 `dm_sign/dji_sign` 的 `.fb` 在驱动解码时统一到机体坐标；输出极性按 `.out` 在驱动下发时统一处理（`dm.c` / `dji.c`），调用方不要取反。详见 [LQR_PLAN.md](LQR_PLAN.md)。
 
 ---
+
+
+## 2026-10-06 · 许可与恢复链
+
+Comm先汇总ctrl_fault，再更新有效姿态fallen，调用执行层Robot_Control_Enable_Allowed决定使能；数据失效是硬故障，fallen是恢复需求。Actuation每拍Control_Frame_Read复制同一份输入和许可，估计／LQR／standup／RL取本拍快照，最终output_dispatch统一处理有效性、最新硬故障／总开关和六路有限值。standup可在允许的fallen姿态执行7～10恢复；正常LQR/RL不放开倒置，USB独立权限保持。

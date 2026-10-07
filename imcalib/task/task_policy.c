@@ -132,7 +132,7 @@ static void RL_Action_Publish(const float action[RL_ACTION_SIZE], uint8_t rl_rea
     __set_PRIMASK(primask);
 }
 
-/* 遥控 → 策略指令: 前进 / 转向 / 高度 (范围 RL_CMD_*; 转向右推为负, 同 LQR) */
+/* 遥控 → 策略指令 */
 static void RL_Command_From_Rc(float command[3])
 {
     float vx_max = RL_CMD_VX_MAX;
@@ -156,8 +156,11 @@ static void RL_Command_From_Rc(float command[3])
         height = RL_CMD_HEIGHT_INIT;
     }
 
-    command[0] = rc_command.vel * vx_max;
-    command[1] = -rc_command.yaw * yaw_max;
+    /* 保留训练范围 */
+    command[0] = machine->lqr.vel_max > 0.0f
+        ? rc_command.vel / machine->lqr.vel_max * vx_max : 0.0f;
+    command[1] = machine->lqr.yaw_max > 0.0f
+        ? -rc_command.yaw / machine->lqr.yaw_max * yaw_max : 0.0f;
     command[2] = height;
     input_command.vx_cmd = command[0];
     input_command.yaw_cmd = command[1];
