@@ -1,5 +1,9 @@
 # 独立自起模块
 
+> 2026-10-08当前交接：自起到位持稳后，同拍直接交给原LQR求解及唯一输出口。blend、blend_time及渐入函数已删除，不保留对照开关。新的39通道自起诊断页及到位阻塞位见 [VOFA通道定义](vofa_policy_trace.md)。下文历史参数快照中的blend字段不再适用。
+
+> 2026-10-08：基于d37e2f1仅移除自起/翻倒恢复的独立roll PID及左右F差动力，包括相关权重、速率和状态字段。正常LQR的roll辅助环保留；roll姿态分类、触发及到位窗口保持。腿长单环、原支撑前馈渐入、输出混合交接、K表及物理映射均未调整。下方roll恢复控制章节为历史实现，相关差动力字段已不可用。
+
 `imcalib/Algorithm/standup.c/h` 是唯一自起模块，沿原执行任务1kHz运行；不新增任务、反馈解算或通信入口。当前包含正立准备及俯仰翻倒／仰卧恢复第一轮试验；明显侧躺或混合大侧偏只分类后停止，尚未执行侧躺扶正。
 
 ## 公共输入与参数
@@ -16,19 +20,25 @@
 
 ## 状态与目标分发
 
+2026-10-08按作者要求撤销稳定后加支撑试验：恢复SWING从首拍按support_time渐入支撑，stable_time恢复0.05s；到位持稳满足后即可进入DONE，不等待支撑渐入完成。普通RETRACT仍按长度门槛立即转摆正。预收腿及腿长目标斜坡保持删除，伸腿超时直接后摆保持；参数以源码为准。
+
+2026-10-08移除腿长差预收步骤及pre_retract_diff／pre_retract_tol参数，恢复普通EXTEND→REAR→RETRACT→SWING→DONE选路。已满足的准备步骤仍可跳过，倒置仍先走原翻身恢复。
+
+普通EXTEND超过extend_timeout仍未到位时，同拍直接进入REAR后摆，继续输出PREPARE，不进入FAILED、不撤力等待、不消耗重试次数。后摆沿原连续上绕路径前往rear_angle（当前−1.5rad），两腿分别保持超时转段时的实际腿长；重新初始化路径、清支撑和交接渐入、预置腿长与摆角PD历史。后摆到位后仍按原流程收腿及摆正，不直接跳入SWING。反馈无效、执行硬门控、姿态保护及其他阶段超时仍沿原处理；保留实际腿长有限值检查。
+
 | phase | 意义 |
 |---|---|
 | 0 IDLE | 首次投入统一准备后摆；许可不足时need=1、不出力 |
 | 1 RETRACT | 第一步：长度PD直接给短腿目标，两腿都≤retract_ready_len后立即切入摆腿，Tp与两轮为零 |
-| 2 SWING | 第二步：摆角位置外环＋速度内环对齐原站立摆角，长度PD继续向原站立长度控制，支撑前馈渐入，轮零 |
-| 3 DONE | 准备条件持续满足，允许原LQR投入；先渐变最终输出，随后正常平衡 |
+| 2 SWING | 第二步：摆角双环对齐站立摆角、腿长PD保持retract_len；支撑从首拍渐入，到位持稳后接管，轮零 |
+| 3 DONE | 准备条件持续满足，同拍交给原LQR投入并输出完整控制力矩 |
 | 4 FAILED | 第一条错误锁存、清输出，退出投入位置后才能重试 |
 | 5 REAR | 上绕后摆，保持进入腿长、连续几何角路径、轮零和支撑零 |
-| 6 EXTEND | 先伸腿，保持进入摆角，腿长目标extend_len，轮零和支撑零 |
+| 6 EXTEND | 先伸腿，保持进入摆角，腿长目标extend_len；到位或超时后转REAR，轮零和支撑零 |
 
 当前流程为 `IDLE → EXTEND → REAR → RETRACT → SWING → DONE`，phase为 `0 → 6 → 5 → 1 → 2 → 3`。已伸足可跳过EXTEND，已在后摆窗口可跳过REAR；原RETRACT的0.19m摆腿切入门槛保留。收腿PID目标 `retract_len` 保持0.15m；新增 `retract_ready_len` 是切入摆腿门槛，当前0.19m。两腿都≤门槛就立即开始摆腿，不再要求长度误差±length_tol、伸缩速度低、目标长度到位或额外保持100ms。进入时已经满足门槛可直接SWING；摆腿期间长度目标也保持retract_len；接入后LQR仍使用各机器原站立长度。数值以源码为准。
 
-到位统一由Standup_Ready判断：EXTEND两腿实际长度≥有效extend_len−extend_tol并保持stable_time；REAR两腿沿选定路径的连续几何角都到rear_goal±rear_tol并保持stable_time后转段；RETRACT保持两腿实际长度≤0.19m切入摆腿；SWING只检查左右实际／指令腿长误差≤0.04m、摆角误差≤angle_tol（作者当前改为0.3rad），并连续保持stable_time（当前100ms）。不再检查世界pitch角度、pitch角速度、腿长／摆角速度或支撑渐入完成。支撑仍按原控制过程渐入，但不是交接门槛。
+到位统一由Standup_Ready判断：EXTEND两腿实际长度≥有效extend_len−extend_tol并保持stable_time；REAR两腿沿选定路径的连续几何角和目标都到rear_goal±rear_tol并保持stable_time后转段；RETRACT两腿实际长度≤retract_ready_len就切入摆腿。SWING检查两腿实际／指令长度误差≤length_tol、摆角误差≤angle_tol及abs(roll)≤roll_ready，连续满足stable_time后交接，不检查支撑渐入是否完成。到位判据不检查pitch速度或腿长／摆角速度；世界pitch姿态保护保留。参数数值以源码为准。
 
 自起没有独立pitch纠偏环；自起摆角环已不使用pitch／gyro作坐标换算或速度反馈；原LQR仍按原定义使用它们。世界pitch仍用于自起触发、准备姿态保护和公共翻倒保护，输入有效标志保留。本轮只简化交接到位判定，不改反馈坐标或公共保护。支撑角度窗口仍为STANDUP_SUPPORT_ANGLE_RANGE=0.6rad，支撑力计算不改。
 
@@ -48,15 +58,15 @@
 
 `Robot_Control_Init` 调用无机器参数的 `Standup_Init`。执行层仍由左中＋右中选择这条路径；原 `lqr_engage_update`、`solve_lqr`、RL与唯一 `output_dispatch` 函数体保持。
 
-DONE之前，Standup_Update输出准备力矩；本拍刚完成仍发最后一拍准备输出。后续DONE拍由执行层先调用原投入／求解生成有效LQR候选，再交给同一个Standup_Update内部做短输出渐变，不再暴露Standup_Handoff接口。首次投入不再直接判断已站立并跳过准备，而是统一确认后摆位置；关闭standup仍沿原LQR路径。正常平衡不强制重复后摆，仍按原Standup_Need和trigger_time触发新的准备周期。
+DONE之前，Standup_Update输出准备力矩。SWING到位条件连续满足stable_time后进入DONE并同拍返回BALANCE；执行层立即调用原投入／求解，髋与轮使用完整LQR候选，不再输出准备候选或等待渐入。后续DONE拍沿原投入／求解路径运行。首次投入仍统一确认准备位置；关闭standup仍沿原LQR路径。正常平衡按原Standup_Need和trigger_time触发新的准备周期。
 
-交接只混合两个已包含补偿的最终候选：关节 `(1-blend)*prepare+blend*balance`，轮输出 `blend*balance`；交接期间根据当前反馈刷新准备控制，blend=1后停止准备计算，不重复补偿。故障或LQR候选无效同拍清输出并锁存。再次触发时，执行层本拍算出的平衡候选被准备输出覆盖，唯一分发口只发送最终选择的一份。
+交接候选由原Leg_Balance_Compute完成公共映射、弹簧补偿与限幅，只经唯一分发口发送一次，不重复补偿。首次交接允许执行层随后建立候选，后续DONE拍要求有效候选；投入失败或候选无效仍同拍清输出并锁存。再次触发时，执行层本拍算出的平衡候选仍被准备输出覆盖。
 
 无效世界pitch／IMU离线归硬FAULT_IMU。有效pitch超过1.4rad仍置fallen、小于1.0rad解除；正常LQR／RL据此停止，自起模式开启recovery_enabled时按新恢复状态执行，硬故障保持停止。自起自身失败保持零力矩，不另发失能命令。反馈恢复不清锁存；有效遥控退出右中、左下或切模式清本次状态。
 
 ## 观测与验证
 
-当前作者已将初始化默认设为 `standup_control.enabled=1`，左中＋右中进入自起／LQR选择；失能时设为0可回到原平衡路径。Watch看 `standup_param`、`standup_control.phase/fault/need`、length_cmd、angle_cmd、angle_speed_cmd、force、tp、support、blend以及三组PID历史。旧active/done/param/handoff字段已移除，状态码也已更新。
+当前初始化默认 `standup_control.enabled=1`，左中＋右中进入自起／LQR选择；失能时设为0可回到原平衡路径。Watch看standup_param、standup_control的phase／fault／need／retry／pose／ready_block、length_cmd、angle_cmd、angle_speed_cmd、force、tp、support及三组PID历史。ready_block由实际到位判据生成，不改变判据；DONE／FAILED保留最后检查值。旧active／done／param／handoff／blend字段已移除。
 
 普通VOFA沿用Robot_Control_Send_Vofa发送39通道，现完整记录控制摆角／速度、目标、F/Tp、支撑、交接、pitch及最终髋／轮命令。完整通道定义见 [VOFA全过程](vofa_policy_trace.md)。旧离线留证通道已替换，但原内部锁存继续工作。数据用于比较响应和阶段时限，不直接据图形观感调参。
 
@@ -192,7 +202,7 @@ rear_position通过每拍Wrap(本拍几何角−上一拍几何角)累计展开�
 Rear到位同时要求展开实际角及推进后的目标角都距终点≤rear_tol，再保持原stable_time，防止目标尚未推进到终点就提前切段。作者当前将tp_max调为30N·m、速度目标上限调为6rad/s，本轮保留，不恢复40／10。正立从+0.5上绕到−1.3等效终点约4.983，目标推进约1.06秒（不代表实际到位时间）；可在Watch看angle_cmd／rear_position／rear_goal，CAN诊断页ch36/37为环绕几何反馈。
 
 
-## 双腿可支撑时的roll恢复（当前）
+## 双腿可支撑时的roll恢复（历史，已移除）
 
 作者确认常见姿态是明显侧偏但两腿仍能支撑。本轮在准备控制中增加独立roll PD，参数读取本机原LQR roll的P/D、强制Ki0，首拍预置历史；目标为原控制坐标roll=0（Euler[0]）。差动力方向沿用正常Leg_Balance：左F加、右F减，不改电机极性／零点。
 

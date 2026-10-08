@@ -11,8 +11,8 @@ standup_ctx_t standup_control;
 standup_param_t standup_param = {
     /* 恢复触发 */
     .trigger_angle           = 50.0f * LEG_PI / 180.0f,         /* 腿角 rad */
-    .trigger_pitch           = 40.0f * LEG_PI / 180.0f,         /* 俯仰 rad */
-    .trigger_roll            = 40.0f * LEG_PI / 180.0f,         /* 横滚 rad */
+    .trigger_pitch           = 50.0f * LEG_PI / 180.0f,         /* 俯仰 rad */
+    .trigger_roll            = 50.0f * LEG_PI / 180.0f,         /* 横滚 rad */
     .trigger_time            = 0.2f,                            /* 持续 s */
     .pitch_max               = 1.0f,                            /* 翻身 rad */
     .roll_max                = 1.0f,                            /* 侧偏 rad */
@@ -22,7 +22,7 @@ standup_param_t standup_param = {
     .extend_tol              = 0.01f,                           /* 容差 m */
     .extend_timeout          = 4.0f,                            /* 超时 s */
     .rear_angle              = -1.5f,                           /* 后点 rad */
-    .rear_tol                = 0.3f,                            /* 容差 rad */
+    .rear_tol                = 0.1f,                            /* 容差 rad */
     .rear_rate               = 5.1f,                            /* 目标 rad/s */
     .rear_timeout            = 4.0f,                            /* 超时 s */
 
@@ -30,21 +30,19 @@ standup_param_t standup_param = {
     .retract_len             = 0.15f,                           /* 目标 m */
     .retract_ready_len       = 0.16f,                           /* 转摆 m */
     .length_tol              = 0.03f,                           /* 容差 m */
-    .angle_tol               = 0.3f,                            /* 容差 rad */
+    .angle_tol               = 0.2f,                            /* 容差 rad */
     .roll_ready              = 0.3f,                            /* 到位 rad */
-    .timeout                 = {3.0f, 4.0f},                    /* 收/摆 s */
+    .timeout                 = {2.0f, 3.0f},                    /* 收/摆 s */
 
     /* 摆角串级PD */
     .angle_pos_kp            = 25.0f,                           /* 位置 P */
-    .angle_pos_kd            = 20.0f,                           /* 位置 D */
+    .angle_pos_kd            = 15.0f,                           /* 位置 D */
     .angle_speed_kp          = 5.0f,                            /* 速度 P */
     .angle_speed_kd          = 5.0f,                            /* 速度 D */
     .angle_speed_max         = 10.0f,                           /* 目标 rad/s */
 
     /* 出力与纠偏 */
     .tp_max                  = 40.0f,                           /* 摆矩 Nm */
-    .roll_force_max          = 40.0f,                           /* 差动力 N */
-    .roll_force_rate         = 10.0f,                           /* 渐变 N/s */
     .recovery_force_max      = 150.0f,                          /* 恢复力 N */
 
     /* 翻倒恢复 */
@@ -59,7 +57,6 @@ standup_param_t standup_param = {
     /* 持稳与交接 */
     .stable_time             = 0.05f,                           /* 持稳 s */
     .support_time            = 0.4f,                            /* 支撑渐入 s */
-    .blend_time              = 0.25f,                           /* LQR渐入 s */
 
     /* 失败重试 */
     .retry_wait              = 0.1f,                            /* 撤力等待 s */
@@ -97,9 +94,6 @@ static void Standup_PID_Init(standup_ctx_t *st)
 {
     uint8_t i;
 
-    PID_struct_init(&st->roll_pid, POSITION_PID,
-        fminf(standup_param.roll_force_max, machine->lqr.roll.max_output), 0.0f,
-        machine->lqr.roll.kp, 0.0f, machine->lqr.roll.kd, 0.0f, 0.0f);
     for (i = 0u; i < 2u; i++)
     {
         PID_struct_init(&st->length_pid[i], POSITION_PID,
@@ -163,7 +157,8 @@ static uint8_t Standup_Input_Valid(const imu_state_t *imu,
     for (i = 0u; i < 2u; i++)
     {
         if (leg[i] == NULL || !leg[i]->output.valid
-            || !leg[i]->output.force_valid)
+            || !leg[i]->output.force_valid
+            || !isfinite(leg[i]->output.virtual_leg_length))
         {
             return 0u;
         }
@@ -266,7 +261,7 @@ static void Standup_Rear_Path_Update(standup_ctx_t *st,
     }
 }
 
-static uint8_t Standup_Ready(const standup_ctx_t *st,
+static uint8_t Standup_Ready(standup_ctx_t *st,
                             const imu_state_t *imu,
                             const leg_state_t *const leg[2])
 {
@@ -275,57 +270,73 @@ static uint8_t Standup_Ready(const standup_ctx_t *st,
     float command_error;
     uint8_t i;
 
-    if (st->phase == STANDUP_EXTEND)
+    st->ready_block = 0u;
+    if (st->phase == STANDUP_EXTEND || st->phase == STANDUP_RETRACT)
     {
-        return Standup_Extended(leg);
+        length_goal = st->phase == STANDUP_EXTEND
+            ? Standup_Extend_Length() - standup_param.extend_tol : standup_param.retract_ready_len;
+        for (i = 0u; i < 2u; i++)
+        {
+            if ((st->phase == STANDUP_EXTEND && leg[i]->output.virtual_leg_length < length_goal)
+                || (st->phase == STANDUP_RETRACT && leg[i]->output.virtual_leg_length > length_goal))
+            {
+                st->ready_block |= (uint16_t)(1u << i);
+            }
+        }
+        return (uint8_t)(st->ready_block == 0u);
     }
     if (st->phase == STANDUP_REAR)
     {
         if (!st->rear_path_ready)
         {
+            st->ready_block = 0x0200u;
             return 0u;
         }
         for (i = 0u; i < 2u; i++)
         {
-            if (fabsf(st->rear_goal[i] - st->rear_position[i]) > standup_param.rear_tol
-                || fabsf(st->rear_goal[i] - st->angle_cmd[i]) > standup_param.rear_tol)
+            if (fabsf(st->rear_goal[i] - st->rear_position[i]) > standup_param.rear_tol)
             {
-                return 0u;
+                st->ready_block |= (uint16_t)(1u << (4u + i));
+            }
+            if (fabsf(st->rear_goal[i] - st->angle_cmd[i]) > standup_param.rear_tol)
+            {
+                st->ready_block |= (uint16_t)(1u << (6u + i));
             }
         }
-        return 1u;
-    }
-    if (st->phase == STANDUP_RETRACT)
-    {
-        return (uint8_t)(leg[0]->output.virtual_leg_length <= standup_param.retract_ready_len
-            && leg[1]->output.virtual_leg_length <= standup_param.retract_ready_len);
+        return (uint8_t)(st->ready_block == 0u);
     }
     if (st->phase == STANDUP_SWING
         && fabsf(imu->euler_rad[0u]) > standup_param.roll_ready)
     {
-        return 0u;
+        st->ready_block |= 0x0100u;
     }
     for (i = 0u; i < 2u; i++)
     {
         length_goal = standup_param.retract_len;
-        if (fabsf(leg[i]->output.virtual_leg_length - length_goal) > standup_param.length_tol
-            || fabsf(st->length_cmd[i] - length_goal) > standup_param.length_tol)
+        if (fabsf(leg[i]->output.virtual_leg_length - length_goal) > standup_param.length_tol)
         {
-            return 0u;
+            st->ready_block |= (uint16_t)(1u << i);
+        }
+        if (fabsf(st->length_cmd[i] - length_goal) > standup_param.length_tol)
+        {
+            st->ready_block |= (uint16_t)(1u << (2u + i));
         }
         if (st->phase == STANDUP_SWING)
         {
             angle_error = Standup_Wrap(leg[i]->output.virtual_leg_angle
                 - machine->lqr.leg_trim[i]);
             command_error = Standup_Wrap(st->angle_cmd[i] - machine->lqr.leg_trim[i]);
-            if (fabsf(angle_error) > standup_param.angle_tol
-                || fabsf(command_error) > standup_param.angle_tol)
+            if (fabsf(angle_error) > standup_param.angle_tol)
             {
-                return 0u;
+                st->ready_block |= (uint16_t)(1u << (4u + i));
+            }
+            if (fabsf(command_error) > standup_param.angle_tol)
+            {
+                st->ready_block |= (uint16_t)(1u << (6u + i));
             }
         }
     }
-    return 1u;
+    return (uint8_t)(st->ready_block == 0u);
 }
 
 /* 预置PD历史 */
@@ -402,9 +413,6 @@ static void Standup_Recovery_Enter(standup_ctx_t *st, uint8_t phase,
     Standup_Enter(st, phase);
     st->len_history_ready = 0u;
     st->angle_history_ready = 0u;
-    st->roll_history_ready = 0u;
-    st->roll_force = 0.0f;
-    st->roll_applied = 0.0f;
     st->support = 0.0f;
     st->stall_elapsed = 0.0f;
     for (i = 0u; i < 2u; i++)
@@ -657,10 +665,7 @@ static uint8_t Standup_Stage_Update(standup_ctx_t *st,
         else
         {
             st->trigger_elapsed = 0.0f;
-            if (st->blend >= 1.0f)
-            {
-                st->retry = 0u;
-            }
+            st->retry = 0u;
         }
         if (st->trigger_elapsed < standup_param.trigger_time)
         {
@@ -731,6 +736,15 @@ static uint8_t Standup_Stage_Update(standup_ctx_t *st,
     }
     if (st->elapsed > timeout)
     {
+        if (st->phase == STANDUP_EXTEND)
+        {
+            st->len_history_ready = 0u;
+            st->angle_history_ready = 0u;
+            st->rear_path_ready = 0u;
+            st->support = 0.0f;
+            Standup_Enter(st, STANDUP_REAR);
+            return STANDUP_ROUTE_PREPARE;
+        }
         Standup_Fail(st, STANDUP_TIMEOUT);
         return STANDUP_ROUTE_STOP;
     }
@@ -774,7 +788,7 @@ static uint8_t Standup_Stage_Update(standup_ctx_t *st,
         else
         {
             Standup_Enter(st, STANDUP_DONE);
-            st->blend = 0.0f;
+            return STANDUP_ROUTE_BALANCE;
         }
     }
     return STANDUP_ROUTE_PREPARE;
@@ -838,35 +852,6 @@ static void Standup_Target_Update(standup_ctx_t *st,
             }
         }
     }
-}
-
-/* 支撑方向差动力 */
-static void Standup_Roll_Calculate(standup_ctx_t *st, const imu_state_t *imu,
-                                   const leg_state_t *const leg[2], float dt)
-{
-    float request;
-    float weight;
-    float step;
-    uint8_t i;
-
-    if (!st->roll_history_ready)
-    {
-        Standup_Prime(&st->roll_pid, imu->euler_rad[0u], 0.0f);
-        st->roll_history_ready = 1u;
-    }
-    request = pid_calc(&st->roll_pid, imu->euler_rad[0u], 0.0f, dt);
-    request = clampf(request, -standup_param.roll_force_max, standup_param.roll_force_max);
-    step = standup_param.roll_force_rate * dt;
-    st->roll_force = clampf(request, st->roll_force - step, st->roll_force + step);
-    st->roll_weight = 1.0f;
-    for (i = 0u; i < 2u; i++)
-    {
-        weight = clampf(cosf(leg[i]->output.virtual_leg_angle - imu->pitch_world), 0.0f, 1.0f);
-        st->roll_weight = fminf(st->roll_weight, weight);
-    }
-    st->roll_applied = st->roll_force * st->roll_weight;
-    st->force[0] += st->roll_applied;
-    st->force[1] -= st->roll_applied;
 }
 
 /* 计算腿端F与Tp */
@@ -962,39 +947,6 @@ static uint8_t Standup_Torque_Output(standup_ctx_t *st,
     return 1u;
 }
 
-/* 完成后的输出渐变 */
-static uint8_t Standup_Blend(standup_ctx_t *st, float dt,
-                            torque_output_t *torque)
-{
-    float value;
-    uint8_t i;
-
-    if (!torque->valid || !st->prepare.valid)
-    {
-        return 0u;
-    }
-    st->blend = clampf(st->blend + dt / standup_param.blend_time, 0.0f, 1.0f);
-    for (i = 0u; i < DM_MOTOR_NUM; i++)
-    {
-        value = (1.0f - st->blend) * st->prepare.dm[i] + st->blend * torque->dm[i];
-        if (!isfinite(value))
-        {
-            return 0u;
-        }
-        torque->dm[i] = clampf(value, -machine->dm_trq_clamp, machine->dm_trq_clamp);
-    }
-    for (i = 0u; i < DJI_MOTOR_NUM; i++)
-    {
-        value = st->blend * torque->dji[i];
-        if (!isfinite(value))
-        {
-            return 0u;
-        }
-        torque->dji[i] = clampf(value, -machine->dji_trq_clamp, machine->dji_trq_clamp);
-    }
-    return 1u;
-}
-
 uint8_t Standup_Update(standup_ctx_t *st, const imu_state_t *imu,
                        const leg_state_t *left, const leg_state_t *right,
                        uint8_t permit, uint8_t allow_restart, float dt,
@@ -1023,9 +975,9 @@ uint8_t Standup_Update(standup_ctx_t *st, const imu_state_t *imu,
         Torque_Output_Clear(torque);
         return route;
     }
-    if (route == STANDUP_ROUTE_BALANCE && st->blend >= 1.0f)
+    if (route == STANDUP_ROUTE_BALANCE)
     {
-        if (previous_phase != STANDUP_IDLE && !torque->valid)
+        if (previous_phase == STANDUP_DONE && !torque->valid)
         {
             Standup_Fail(st, STANDUP_BAD_INPUT);
             Torque_Output_Clear(torque);
@@ -1040,16 +992,6 @@ uint8_t Standup_Update(standup_ctx_t *st, const imu_state_t *imu,
         Standup_Fail(st, STANDUP_BAD_INPUT);
         Torque_Output_Clear(torque);
         return STANDUP_ROUTE_STOP;
-    }
-    if (!st->recovery_enabled || st->upright > 0.0f)
-    {
-        Standup_Roll_Calculate(st, imu, leg, dt);
-    }
-    else
-    {
-        st->roll_force = 0.0f;
-        st->roll_applied = 0.0f;
-        st->roll_weight = 0.0f;
     }
     if (Standup_Recovering(st))
     {
@@ -1068,12 +1010,6 @@ uint8_t Standup_Update(standup_ctx_t *st, const imu_state_t *imu,
     if (route == STANDUP_ROUTE_PREPARE)
     {
         *torque = st->prepare;
-    }
-    else if (!Standup_Blend(st, dt, torque))
-    {
-        Standup_Fail(st, STANDUP_BAD_INPUT);
-        Torque_Output_Clear(torque);
-        return STANDUP_ROUTE_STOP;
     }
     return route;
 }

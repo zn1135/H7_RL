@@ -203,10 +203,9 @@ static void Robot_Control_Send_Vofa(void)
     static float dbg[VOFA_MAX_CH];
     uint8_t online_mask;
     uint16_t state_bits;
-    uint32_t rl_bits;
-#if CONTROL_TIME_VOFA_ENABLE
-    control_time_debug_t time_sample;
-#endif
+    uint16_t standup_bits;
+    uint8_t balance;
+    uint8_t i;
 
     memset(dbg, 0, sizeof(dbg));
     /* ch0 在线掩码 */
@@ -233,62 +232,55 @@ static void Robot_Control_Send_Vofa(void)
     state_bits |= output_task_rl_engaged() ? 0x200u : 0x00u;
     dbg[1] = (float)state_bits;
 
-    rl_bits  = rl_control.policy.ready ? 0x01u : 0x00u;
-    rl_bits |= rl_control.observation.history_ready ? 0x02u : 0x00u;
-    rl_bits |= action_state.rl_ready ? 0x04u : 0x00u;
-    rl_bits |= output_task_rl_engaged() ? 0x08u : 0x00u;
-    rl_bits |= rl_control.observation.valid ? 0x40u : 0x00u;
-    rl_bits |= machine->rl.configured ? 0x80u : 0x00u;
-    rl_bits |= (rl_control.policy.run_fail & 0xFFu) << 8;
-    rl_bits |= output_debug_dm_sent ? 0x00010000u : 0x00u;
-    rl_bits |= output_debug_dji_sent ? 0x00020000u : 0x00u;
-    dbg[2] = (float)rl_bits;
-
-    // for(int i = 0;i<25;i++)
-    // {
-    //     dbg[i + 3] = rl_control.observation.obs[i];
-    // }
-
-
-    for(int i = 0;i<10;i++)
+    dbg[2] = (float)ctrl_fault;
+    dbg[3] = (float)standup_control.phase;
+    dbg[4] = (float)standup_control.fault;
+    dbg[5] = standup_control.elapsed * 1000.0f;
+    dbg[6] = standup_control.stable * 1000.0f;
+    standup_bits  = standup_control.enabled ? 0x0001u : 0x00u;
+    standup_bits |= standup_control.need ? 0x0002u : 0x00u;
+    standup_bits |= standup_control.recovery_enabled ? 0x0004u : 0x00u;
+    standup_bits |= standup_control.recovered ? 0x0008u : 0x00u;
+    standup_bits |= standup_control.prepare.valid ? 0x0010u : 0x00u;
+    standup_bits |= imu_state.pitch_world_valid ? 0x0020u : 0x00u;
+    standup_bits |= lqr_state.valid ? 0x0040u : 0x00u;
+    standup_bits |= lqr_state.gain_valid ? 0x0080u : 0x00u;
+    standup_bits |= output_debug_dm_sent ? 0x0100u : 0x00u;
+    standup_bits |= output_debug_dji_sent ? 0x0200u : 0x00u;
+    standup_bits |= leg_l.output.force_valid ? 0x0400u : 0x00u;
+    standup_bits |= leg_r.output.force_valid ? 0x0800u : 0x00u;
+    dbg[7] = (float)standup_bits;
+    dbg[8] = (float)standup_control.ready_block;
+    dbg[9] = (float)standup_control.retry;
+    dbg[10] = (float)standup_control.pose;
+    dbg[11] = imu_state.pitch_world;
+    dbg[12] = imu_state.euler_rad[1];
+    dbg[13] = imu_state.euler_rad[0];
+    dbg[14] = imu_state.gyro_rad_s[1];
+    dbg[15] = standup_control.upright;
+    dbg[16] = standup_control.support;
+    dbg[17] = leg_l.output.virtual_leg_length;
+    dbg[18] = leg_r.output.virtual_leg_length;
+    balance = output_task_lqr_engaged();
+    for (i = 0u; i < 2u; i++)
     {
-        dbg[i + 3] = lqr_state.x[i];
+        dbg[19u + i] = balance ? lqr_state.leg_len_tgt[i] : standup_control.length_cmd[i];
+        dbg[23u + i] = balance ? machine->lqr.leg_trim[i] + imu_state.euler_rad[1]
+            : standup_control.angle_cmd[i];
+        dbg[27u + i] = balance ? leg_balance.F[i] : standup_control.force[i];
+        dbg[29u + i] = balance ? leg_balance.Tp[i] : standup_control.tp[i];
+        dbg[35u + i] = rl_output_wheel_cmd_nm[i];
     }
-    for(int i = 0;i<10;i++)
+    dbg[21] = leg_l.output.virtual_leg_angle;
+    dbg[22] = leg_r.output.virtual_leg_angle;
+    dbg[25] = leg_l.output.d_virtual_leg_angle;
+    dbg[26] = leg_r.output.d_virtual_leg_angle;
+    for (i = 0u; i < DM_MOTOR_NUM; i++)
     {
-        dbg[i + 13] = lqr_state.target[i];
+        dbg[31u + i] = rl_output_dm_cmd_nm[i];
     }
-    for(int i = 0;i<LQR_U_NUM;i++)
-    {
-        dbg[i + 23] = lqr_state.u[i];
-    }
-    // for(int i = 0;i<2;i++)
-    // {
-        // dbg[i + 29] = motor_state.dji.vel_rad_s[i];
-    // }
-    dbg[27] = lqr_state.leg_len_tgt[0];
-    dbg[28] = lqr_state.leg_len_tgt[1];
-    dbg[29] = leg_l.output.virtual_leg_length;
-    dbg[30] = leg_r.output.virtual_leg_length;
-    dbg[31] = leg_l.output.virtual_leg_angle;
-    dbg[32] = leg_r.output.virtual_leg_angle;
-    // for(int i = 0;i<4;i++)
-    // {
-    //     dbg[i + 31] = motor_state.dm.vel_rad_s[i];
-    //     dbg[i + 35] = motor_state.dm.pos_zero_rad[i];
-    // }
-    // for(int i = 0;i<3;i++)
-    // {
-    //     dbg[i + 29] = imu_state.euler_deg[i];
-    //     dbg[i + 32] = imu_state.gyro_rad_s[i];
-    //     dbg[i + 35] = imu_state.acc_g[i];
-    // }
-
-#if CONTROL_TIME_VOFA_ENABLE
-    taskENTER_CRITICAL();
-    time_sample = control_time_debug;
-    taskEXIT_CRITICAL();
-#endif
+    dbg[37] = (float)(motor_state.timestamp_ms & 0x00FFFFFFu);
+    dbg[38] = standup_param.stable_time * 1000.0f;
     (void)Vofa_Send(dbg, VOFA_MAX_CH);
 }
 

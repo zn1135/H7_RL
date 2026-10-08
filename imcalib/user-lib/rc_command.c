@@ -31,7 +31,7 @@ void Rc_Command_Update(rc_command_t *cmd, const dr16_t *rc)
         cmd->online = 0u;
         return;
     }
-    cmd->vel = Rc_Axis(rc->ch1, RC_DEADBAND_VEL) * machine->lqr.vel_max;
+    cmd->vel = Rc_Axis(rc->ch3, RC_DEADBAND_VEL) * machine->lqr.vel_max;
     cmd->yaw = -Rc_Axis(rc->ch0, RC_DEADBAND_YAW) * machine->lqr.yaw_max;
     cmd->len = Rc_Axis(rc->wheel, RC_DEADBAND_LEN);
     cmd->s1 = rc->s1;

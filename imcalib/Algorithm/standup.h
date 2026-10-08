@@ -68,8 +68,6 @@ typedef struct {
     float angle_speed_kd;
     float angle_speed_max;
     float tp_max;
-    float roll_force_max;
-    float roll_force_rate;
     float roll_ready;
     float trigger_angle;
     float trigger_pitch;
@@ -79,7 +77,6 @@ typedef struct {
     float roll_max;
     float stable_time;
     float support_time;
-    float blend_time;
     float trigger_time;
     float timeout[2];
 } standup_param_t;
@@ -96,12 +93,11 @@ typedef struct {
     uint8_t len_history_ready;
     uint8_t angle_history_ready;
     uint8_t rear_path_ready;
-    uint8_t roll_history_ready;
+    uint16_t ready_block;      /* 到位阻塞 */
     float retry_elapsed;
     float elapsed;
     float stable;
     float trigger_elapsed;
-    float blend;
     float support;
     float length_cmd[2];
     float angle_cmd[2];
@@ -118,13 +114,9 @@ typedef struct {
     float side;
     float force[2];
     float tp[2];
-    float roll_force;
-    float roll_weight;
-    float roll_applied;
     pid_t length_pid[2];
     pid_t angle_pos_pid[2];
     pid_t angle_speed_pid[2];
-    pid_t roll_pid;
     torque_output_t prepare;
     float raw_dm[DM_MOTOR_NUM];   /* 限幅前 */
 } standup_ctx_t;

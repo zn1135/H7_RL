@@ -1,24 +1,58 @@
 # VOFA 采集与模式切换
 
-> 当前作者已恢复LQR状态页，仍39通道（ch0～38），新增roll恢复观测如下。此前CAN诊断表已成为历史。普通页需 `vofa_trace_requested=0`。下方38通道布局及周期通道覆盖表均为历史；策略追踪32通道帧保持原定义。
+> 2026-10-08当前普通页已替换为自起诊断，39通道（ch0～38）。普通页需vofa_trace_requested=0；旧LQR状态页、roll差动力页及CAN诊断布局均为历史。策略追踪32通道帧保持原定义。
 
 
 默认通过 UART8 发送普通 39 通道 JustFloat；USB CDC 留给 JID1。`vofa_transport.requested/active` 的 1 为 UART8、0 为 USB CDC。普通帧是 39 个小端 float32 与 `00 00 80 7F` 帧尾，共 160 字节；策略追踪仍为 32 通道、132 字节。
 
-## 当前LQR＋roll恢复观测
+## 当前自起诊断（39通道）
 
-ch0在线、ch1原使能／投入状态、ch2原RL／发送状态；ch3～12为LQR十维状态，ch13～22为十维目标，ch23～26为4路模型输出u，ch27为姿态分类、ch28为回正程度upright；ch29/30实际左右腿长，ch31/32实际左右几何角。
-
-| 通道 | 内容 | 单位 |
+| 通道 | 内容 | 单位／说明 |
 |---|---|---|
-| ch33 | 原roll Euler[0] | rad |
-| ch34 | 自起roll_applied差动力 | N，左F加／右F减 |
-| ch35 | 自起roll_weight | 0～1，方向权重，不是接地状态 |
-| ch36 | 自起phase | 6伸腿、5上绕后摆、1收腿、2摆正、3交接／LQR、4失败；7等稳、8短腿调整、9翻身扫腿、10支撑回正 |
-| ch37 | 自起阶段elapsed | ms |
-| ch38 | 自起fault | 3姿态、4许可、2超时 |
+| ch0 | 在线掩码 | bit0 IMU、1遥控、2～5四髋、6～7两轮；全部在线为255 |
+| ch1 | 原使能／投入状态 | bit0整机许可、1跌倒、2～3两腿有效、4～7四髋使能、8 LQR已投入、9 RL已投入 |
+| ch2 | ctrl_fault硬故障 | 1 IMU、2遥控、4电机、8 CAN、16动作，可相加 |
+| ch3 | 自起phase | 0待机、1收腿、2摆正、3完成／交LQR、4失败、5后摆、6伸腿、7翻身等稳、8翻身腿长调整、9翻身扫腿 |
+| ch4 | 自起fault | 0正常、1输入无效、2超时、3姿态不允许、4执行许可被门控、5状态／配置异常 |
+| ch5／6 | elapsed／stable | ms，阶段运行／连续到位计时；转段清零 |
+| ch7 | 自起诊断位 | 见下表 |
+| ch8 | 到位阻塞位ready_block | 0为当前检查通过；非零位解释见下表 |
+| ch9 | retry | 已消耗重试次数 |
+| ch10 | pose | 0正立、1倒置／大pitch恢复、2侧偏、3无效 |
+| ch11／12／13 | 世界pitch／Euler pitch／Euler roll | rad；ch11用于自起姿态与翻倒保护 |
+| ch14 | pitch角速度 | rad/s，原IMU gyro[1] |
+| ch15 | upright | 四元数重力投影，负值为倒置侧；不是到位标志 |
+| ch16 | support | 自起支撑渐入比例0～1，DONE后保留最后自起值 |
+| ch17／18 | 左／右实际腿长 | m |
+| ch19／20 | 左／右控制腿长目标 | m；准备时length_cmd，LQR投入时leg_len_tgt |
+| ch21／22 | 左／右实际几何摆角 | rad |
+| ch23／24 | 左／右目标摆角 | rad；准备时原angle_cmd，后摆／翻身可为连续展开角；LQR投入时leg_trim加Euler pitch仅用于几何坐标显示 |
+| ch25／26 | 左／右几何摆角速度 | rad/s |
+| ch27／28 | 左／右选中足端F | N；准备时standup.force，LQR投入时leg_balance.F，均为弹簧补偿前控制力 |
+| ch29／30 | 左／右选中Tp | N·m，准备或LQR虚拟摆腿矩 |
+| ch31～34 | 四髋最终下发请求 | N·m，控制坐标，左前／左后／右前／右后；含补偿和限幅，不是实测力矩 |
+| ch35／36 | 两轮最终下发请求 | N·m，左／右 |
+| ch37 | 通信采样时间戳 | ms，板端低24位，约4.66小时回绕；用差值检查丢帧 |
+| ch38 | 当前stable_time参数 | ms，实际源码／Watch配置 |
 
-自起完全交给LQR后，ch34/35可能保留最后准备值，不代表正常LQR仍使用自起roll环；结合phase和原LQR投入位判断。当前任务不恢复作者移除的CAN页。普通仍JustFloat39通道，追踪32帧不改。
+ch7为诊断掩码：bit0 enabled、1 need、2 recovery_enabled、3 recovered、4 prepare.valid、5世界pitch有效、6 LQR状态有效、7 K有效、8髋请求入队成功、9轮请求入队成功、10左腿力映射有效、11右腿力映射有效。enabled是自起功能开关，need表示当前准备／失败需要自起；都不能单独代表已出力。recovered用于翻身后的首次平衡状态重置，消费后清零。prepare.valid及准备控制量在DONE可能保留最后值，实际控制源应看ch1的LQR投入位及最终命令。
+
+| ch8位值 | 阻塞原因 |
+|---|---|
+| 1／2 | 左／右实际腿长未到位；伸腿为最小长度门槛，收腿为最大长度门槛，摆正为retract_len误差窗口 |
+| 4／8 | 左／右长度指令未进入retract_len窗口 |
+| 16／32 | 左／右实际摆角未到位；后摆按展开路径，摆正按原环绕误差 |
+| 64／128 | 左／右摆角目标未进入到位窗口 |
+| 256 | roll未进入roll_ready窗口 |
+| 512 | 后摆路径尚未初始化 |
+
+阻塞位可相加，例如3表示两腿实际长度均未到位，48表示两腿实际摆角均未到位。该掩码由Standup_Ready实际判据生成，不在通信层另做判断；只在到位检查时刷新，DONE／FAILED保留最后值。0不代表持稳已够，需同时比较ch6和ch38；硬故障或姿态停止应看ch2／4，不能仅看旧阻塞位。
+
+推荐先画ch3／4／5／6／8判断阶段与卡点，再画ch11／13、ch17～24和ch27～36关联姿态、跟踪及出力。到位后应同拍进入phase3且ch1的256位出现，直接使用完整LQR输出；本次已删除blend／blend_time，没有渐入或对照开关。在线位或请求入队成功不证明电机收到请求，也不代表实机出力与命令相同。
+
+Watch参数分组：伸腿看extend_len／extend_tol／extend_timeout；后摆看rear_angle／rear_tol／rear_rate／rear_timeout；收腿看retract_len／retract_ready_len／timeout[0]；摆正交接看length_tol／angle_tol／roll_ready／stable_time／timeout[1]；支撑看support_time；姿态恢复看pitch_max／roll_max／recovery_enabled及recovery各参数。腿长PD来自machine->lqr.leg_len，摆角串级参数来自standup_param；记录当前烧录参数，不沿用旧快照。
+
+采集包含投入前、一次失败和退出前的完整记录。退出拨杆会清本次状态，FAILED期间控制量及计时通常保留，但硬输出为零；自动重试会清状态并重新准备，结合ch9和ch37识别。新旧CSV即使均39通道也不能混用下标。
 
 ## 历史四髋／FDCAN1诊断（39通道）
 

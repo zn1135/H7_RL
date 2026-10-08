@@ -125,6 +125,102 @@ static inline void follow(void)
 """
 
 CHECKS = {
+    'direct_handoff': r"""
+int main(void)
+{
+    unsigned i,j;
+    setup(standup_param.rear_angle);rc_command.vel=.2f;step();
+    for(i=0;i<2000 && standup_control.phase!=STANDUP_DONE;i++) { follow();step(); }
+    assert(i<2000 && standup_control.phase==STANDUP_DONE && lqr_running);
+    assert(fabsf(sent_wheel[0])>.001f);
+    assert(fabsf(sent_wheel[0]-leg_balance.cmd.dji[0])<1e-6f);
+    for(j=0;j<4;j++) { assert(fabsf(sent_dm[j]-leg_balance.cmd.dm[j])<1e-6f); }
+    lqr_state.K[0][0]=NAN;step();zero();assert(standup_control.fault==STANDUP_BAD_INPUT);
+    rc_command.s2=DR16_SW_UP;step();zero();
+    return 0;
+}
+""",
+    'handoff_and_ready_bits': r"""
+int main(void)
+{
+    const leg_state_t *legs[2]={&leg_l,&leg_r};unsigned i;
+    setup(machine->lqr.leg_trim[0]);
+    Standup_Enter(&standup_control,STANDUP_SWING);
+    leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=standup_param.retract_len;
+    standup_control.length_cmd[0]=standup_control.length_cmd[1]=standup_param.retract_len;
+    standup_control.angle_cmd[0]=machine->lqr.leg_trim[0];standup_control.angle_cmd[1]=machine->lqr.leg_trim[1];
+    assert(Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==0);
+    leg_l.output.virtual_leg_length+=standup_param.length_tol+.01f;
+    standup_control.length_cmd[1]+=standup_param.length_tol+.01f;
+    leg_l.output.virtual_leg_angle+=standup_param.angle_tol+.01f;
+    standup_control.angle_cmd[1]+=standup_param.angle_tol+.01f;
+    imu_state.euler_rad[0]=standup_param.roll_ready+.01f;
+    assert(!Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==409u);
+    Standup_Reset(&standup_control);assert(standup_control.ready_block==0);
+    setup(standup_param.rear_angle);step();
+    for(i=0;i<2000 && standup_control.phase!=STANDUP_SWING;i++) { follow();step(); }
+    assert(standup_control.phase==STANDUP_SWING);
+    standup_control.stable=standup_param.stable_time;follow();ctrl_fault=4;step();zero();
+    assert(standup_control.fault==STANDUP_GATED && !lqr_running);
+    setup(standup_param.rear_angle);step();
+    for(i=0;i<2000 && standup_control.phase!=STANDUP_SWING;i++) { follow();step(); }
+    assert(standup_control.phase==STANDUP_SWING);
+    standup_control.stable=standup_param.stable_time;follow();leg_l.output.force_map[0][0]=NAN;
+    step();zero();assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_BAD_INPUT && !lqr_running);
+    return 0;
+}
+""",
+    'extend_timeout_to_rear': r"""
+int main(void)
+{
+    unsigned i;
+    float measured_l,measured_r,angle_l,angle_r;
+    setup(.5f);leg_l.output.virtual_leg_length=.18f;leg_r.output.virtual_leg_length=.28f;step();
+    assert(standup_control.phase==STANDUP_EXTEND && !lqr_running);
+    assert(standup_control.length_cmd[0]==Standup_Extend_Length());
+    measured_l=leg_l.output.virtual_leg_length;measured_r=leg_r.output.virtual_leg_length;
+    angle_l=leg_l.output.virtual_leg_angle;angle_r=leg_r.output.virtual_leg_angle;
+    standup_control.retry=2;
+    standup_control.elapsed=standup_param.extend_timeout-2*MACHINE_LQR_DT;step();
+    assert(standup_control.phase==STANDUP_EXTEND);
+    standup_control.elapsed=standup_param.extend_timeout+.001f;step();
+    assert(standup_control.phase==STANDUP_REAR && standup_control.prepare.valid);
+    assert(standup_control.fault==STANDUP_OK && standup_control.retry==2);
+    assert(standup_control.elapsed==0 && standup_control.stable==0 && standup_control.rear_path_ready);
+    assert(standup_control.length_cmd[0]==measured_l && standup_control.length_cmd[1]==measured_r);
+    assert(standup_control.support==0 && sent_wheel[0]==0 && sent_wheel[1]==0);
+    assert(fabsf(standup_control.angle_cmd[0]-angle_l)<=standup_param.rear_rate*MACHINE_LQR_DT+1e-6f);
+    assert(fabsf(standup_control.angle_cmd[1]-angle_r)<=standup_param.rear_rate*MACHINE_LQR_DT+1e-6f);
+    assert(standup_control.length_pid[0].dout==0 && standup_control.length_pid[1].dout==0);
+    assert(standup_control.angle_pos_pid[0].dout==0 && standup_control.angle_speed_pid[0].dout==0);
+    for(i=0;i<1800 && standup_control.phase==STANDUP_REAR;i++) { follow();step(); }
+    assert(standup_control.phase==STANDUP_RETRACT && standup_control.tp[0]==0 && standup_control.tp[1]==0);
+    for(i=0;i<100 && standup_control.phase==STANDUP_RETRACT;i++) { follow();step(); }
+    assert(standup_control.phase==STANDUP_SWING);
+    for(i=0;i<1500 && standup_control.phase!=STANDUP_DONE;i++) { follow();step(); }
+    assert(standup_control.phase==STANDUP_DONE && lqr_running);
+    setup(.5f);leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=.18f;step();
+    standup_control.elapsed=standup_param.extend_timeout+.001f;step();
+    standup_control.elapsed=standup_param.rear_timeout+.001f;step();zero();
+    assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_TIMEOUT);
+    setup(.5f);leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=.18f;step();
+    standup_control.elapsed=standup_param.extend_timeout+.001f;ctrl_fault=4;step();zero();
+    assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_GATED);
+    setup(.5f);leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=.18f;step();
+    standup_control.elapsed=standup_param.extend_timeout+.001f;leg_r.output.force_valid=0;step();zero();
+    assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_BAD_INPUT);
+    setup(.5f);leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=.18f;step();
+    standup_control.elapsed=standup_param.extend_timeout+.001f;leg_l.output.virtual_leg_length=NAN;step();zero();
+    assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_BAD_INPUT);
+    setup(.5f);leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=.18f;step();
+    standup_control.recovery_enabled=0;standup_control.elapsed=standup_param.extend_timeout+.001f;
+    imu_state.pitch_world=standup_param.pitch_max+.1f;step();zero();
+    assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_BAD_POSE);
+    setup(.5f);imu_state.quat[0]=0;imu_state.quat[2]=1;imu_state.pitch_world=LEG_PI;step();
+    assert(standup_control.phase==STANDUP_SETTLE);
+    rc_command.s2=DR16_SW_UP;step();zero();return 0;
+}
+""",
     'normal_and_final_gate': r"""
 int main(void)
 {
@@ -158,7 +254,7 @@ int main(void)
     assert(robot_state.fallen && robot_state.motor_enabled);
     assert(standup_control.phase==STANDUP_SETTLE && standup_control.pose==STANDUP_POSE_INVERTED);
     assert(sent_wheel[0]==0 && sent_wheel[1]==0 && !lqr_running);
-    assert(standup_control.roll_applied==0);
+    assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     for(i=0;i<210 && standup_control.phase==STANDUP_SETTLE;i++) { follow();step(); }
     assert(standup_control.phase==STANDUP_TUCK);
     for(i=0;i<110 && standup_control.phase==STANDUP_TUCK;i++) { follow();step(); }
@@ -170,8 +266,8 @@ int main(void)
     assert(standup_control.phase>=STANDUP_RETRACT && standup_control.phase<=STANDUP_EXTEND
         && standup_control.phase!=STANDUP_FAILED);
     pose(.1f,0);
-    for(i=0;i<4000 && (standup_control.phase!=STANDUP_DONE || standup_control.blend<1);i++) { follow();step(); }
-    assert(standup_control.phase==STANDUP_DONE && lqr_running && standup_control.blend==1);
+    for(i=0;i<4000 && standup_control.phase!=STANDUP_DONE;i++) { follow();step(); }
+    assert(standup_control.phase==STANDUP_DONE && lqr_running);
     assert(lqr_debug.trq_max_hip==8 && !standup_control.recovered);
     rc_command.vel=.2f;pose(LEG_PI,LEG_PI);step();
     assert(standup_control.phase==STANDUP_SETTLE && !lqr_running && robot_state.motor_enabled);
@@ -233,40 +329,39 @@ int main(void)
     for(i=0;i<600 && standup_control.phase==STANDUP_FAILED;i++) { step(); }
     assert(standup_control.phase!=STANDUP_FAILED && standup_control.retry==1);
     setup(machine->lqr.leg_trim[0]);standup_control.phase=STANDUP_DONE;
-    standup_control.blend=1;rc_command.vel=.2f;imu_state.euler_rad[0]=.9f;
+    rc_command.vel=.2f;imu_state.euler_rad[0]=.9f;
     for(i=0;i<(unsigned)(standup_param.trigger_time/MACHINE_LQR_DT)+10u && standup_control.phase==STANDUP_DONE;i++) { step(); }
     assert(standup_control.phase!=STANDUP_DONE && standup_control.phase!=STANDUP_FAILED);
-    assert(sent_wheel[0]==0 && sent_wheel[1]==0 && standup_control.roll_applied<0);
+    assert(sent_wheel[0]==0 && sent_wheel[1]==0);
+    assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     setup(0);standup_control.phase=STANDUP_FLIP;
     standup_control.angle_cmd[0]=standup_control.angle_cmd[1]=0;
     imu_state.euler_rad[0]=.4f;step();
-    assert(standup_control.phase==STANDUP_FLIP && standup_control.roll_applied<0);
+    assert(standup_control.phase==STANDUP_FLIP);
+    assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     return 0;
 }
 """,
 
-    'roll_support': r"""
+    'roll_no_compensation': r"""
 int main(void)
 {
-    const leg_state_t *legs[2]={&leg_l,&leg_r};unsigned i;float previous;
+    const leg_state_t *legs[2]={&leg_l,&leg_r};unsigned i;
     setup(0);imu_state.euler_rad[0]=.9f;step();
-    assert(standup_control.phase==STANDUP_REAR && standup_control.roll_applied<0);
-    assert(standup_control.force[1]>standup_control.force[0]);
-    assert(standup_control.roll_pid.dout==0 && standup_control.roll_pid.i==0);
-    assert(fabsf(standup_control.roll_force)<=standup_param.roll_force_rate*MACHINE_LQR_DT+1e-6f);
+    assert(standup_control.phase==STANDUP_REAR);
+    assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     for(i=0;i<250;i++)
     {
-        previous=standup_control.roll_force;step();
-        assert(fabsf(standup_control.roll_force-previous)<=standup_param.roll_force_rate*MACHINE_LQR_DT+1e-5f);
-        assert(fabsf(standup_control.roll_applied)<=standup_param.roll_force_max);
+        step();
+        assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     }
-    assert(fabsf((standup_control.force[0]-standup_control.force[1])-2*standup_control.roll_applied)<1e-5f);
     setup(0);imu_state.euler_rad[0]=-.9f;step();
-    assert(standup_control.roll_applied>0 && standup_control.force[0]>standup_control.force[1]);
+    assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     setup(LEG_PI);imu_state.euler_rad[0]=.4f;step();
-    assert(standup_control.roll_weight==0 && standup_control.roll_applied==0);
+    assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     setup(0);imu_state.euler_rad[0]=1.3f;step();
-    assert(standup_control.phase!=STANDUP_FAILED && standup_control.roll_applied<0);
+    assert(standup_control.phase!=STANDUP_FAILED);
+    assert(fabsf(standup_control.force[0]-standup_control.force[1])<1e-5f);
     setup(machine->lqr.leg_trim[0]);
     standup_control.phase=STANDUP_SWING;
     leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=standup_param.retract_len;
@@ -274,6 +369,9 @@ int main(void)
     standup_control.angle_cmd[0]=machine->lqr.leg_trim[0];standup_control.angle_cmd[1]=machine->lqr.leg_trim[1];
     imu_state.euler_rad[0]=standup_param.roll_ready+.01f;assert(!Standup_Ready(&standup_control,&imu_state,legs));
     imu_state.euler_rad[0]=standup_param.roll_ready-.01f;assert(Standup_Ready(&standup_control,&imu_state,legs));
+    setup(0);standup_control.enabled=0;imu_state.euler_rad[0]=.2f;step();
+    assert(lqr_running && leg_balance.roll.pos_out<0);
+    assert(leg_balance.F[0]<leg_balance.F[1]);
     rc_command.s2=DR16_SW_UP;step();zero();
     return 0;
 }
@@ -445,7 +543,7 @@ int main(void)
     'sequence': r"""
 int main(void)
 {
-    unsigned i,j,k,phases[7],previous;float alpha;
+    unsigned i,j,k,phases[7],previous;
     const float angles[2]={-1.2f,1.2f};
     for(k=0;k<2;k++)
     {
@@ -490,9 +588,8 @@ int main(void)
             if(standup_control.phase==STANDUP_DONE)
             {
                 assert(!standup_control.need && !(standup_control.phase==STANDUP_RETRACT || standup_control.phase==STANDUP_SWING) && (standup_control.phase==STANDUP_DONE));
-                alpha=standup_control.blend;
-                assert(fabsf(sent_wheel[0])<=machine->dji_trq_clamp*alpha+1e-5f);
-                if(alpha>=1) { break; }
+                assert(lqr_running && fabsf(sent_wheel[0])<=machine->dji_trq_clamp+1e-5f);
+                break;
             }
             follow();
         }
@@ -512,7 +609,7 @@ int main(void)
     step();assert(lqr_running && standup_control.phase==STANDUP_IDLE);
     setup(machine_table[MACHINE_DEFAULT].lqr.leg_trim[0]);step();
     assert(standup_control.phase==STANDUP_REAR && standup_control.need && !lqr_running);
-    setup(machine_table[MACHINE_DEFAULT].lqr.leg_trim[0]);standup_control.phase=STANDUP_DONE;standup_control.blend=1;
+    setup(machine_table[MACHINE_DEFAULT].lqr.leg_trim[0]);standup_control.phase=STANDUP_DONE;
     step();assert(lqr_running && standup_control.phase==STANDUP_DONE);
     for(i=0;i<150;i++) { leg_l.output.virtual_leg_angle=1.2f;rc_command.vel=.2f;step(); }
     assert(standup_control.phase==STANDUP_DONE && lqr_running);
@@ -563,12 +660,14 @@ int main(void)
     Standup_Target_Update(&standup_control,&imu_state,legs,MACHINE_LQR_DT);
     assert(standup_control.rear_goal[0]<.5f); /* Planning reverses relative to gravity. */
     setup(standup_param.rear_angle);step();assert(standup_control.phase==STANDUP_RETRACT);
-    setup(.5f);step();for(i=0;i<4100;i++) { step(); }
+    setup(.5f);step();assert(standup_control.phase==STANDUP_REAR);
+    standup_control.elapsed=standup_param.rear_timeout+.001f;step();
     zero();assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_TIMEOUT);
     assert(standup_control.elapsed>standup_param.rear_timeout);
     setup(.5f);leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=.13f;step();
     for(i=0;i<4100;i++) { step(); }
-    zero();assert(standup_control.fault==STANDUP_TIMEOUT && standup_control.elapsed>standup_param.extend_timeout);
+    assert(standup_control.phase==STANDUP_REAR && standup_control.prepare.valid);
+    assert(standup_control.fault==STANDUP_OK && standup_control.retry==0);
     setup(.5f);step();ctrl_fault=4;step();zero();assert(standup_control.fault==STANDUP_GATED);
     return 0;
 }
