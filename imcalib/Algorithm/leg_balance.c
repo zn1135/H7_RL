@@ -111,6 +111,7 @@ static uint8_t Leg_Balance_Output(leg_balance_t *lb, const leg_state_t *leg_l,
     torque->dji[DJI_MOTOR_WHEEL_RGT] = clampf(wheel[1], -lqr_debug.trq_max_wheel,
                                               lqr_debug.trq_max_wheel);
     lb->cmd = *torque;
+    lb->cmd.valid = 1u;
     return 1u;
 }
 

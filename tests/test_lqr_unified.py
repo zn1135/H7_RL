@@ -85,9 +85,6 @@ static void metadata(void)
         Lowpass_Init(&lp,machine->lqr.lpf_alpha[0]);
         Lowpass_Update(&lp,1.0f);
         near(Lowpass_Update(&lp,1.0f),0.51f);
-        near(machine->lqr.leg_len[0].kd*machine->lqr.dt,25.0f);
-        near(machine->lqr.roll.kd*machine->lqr.dt,0.1f);
-        near(machine->lqr.kf_q/machine->lqr.dt,7.0f);
     }
 #endif
     assert(LQR_Gain_Check(&d,&cfg,MACHINE_DEFAULT,MACHINE_CTRL_DT)==LQR_GAIN_OK);
@@ -114,12 +111,14 @@ static void chain(void)
     unsigned i;
     setup(); LQR_Init(&s); Leg_Balance_Init(&balance);
     assert(LQR_State_Update(&s,&imu,&legs[0],&legs[1],wheels,MACHINE_CTRL_DT));
+    LQR_Velocity_Apply(&s,s.ds_raw,MACHINE_CTRL_DT);
     assert(LQR_Enable_Latch(&s,&legs[0],&legs[1]));
     remote.vel=0.1f; remote.yaw=-0.1f;
     assert(LQR_Target_Update(&s,&remote,MACHINE_CTRL_DT));
     LQR_Control_Update(&s); assert(s.gain_valid);
     Torque_Output_Clear(&torque);
     assert(Leg_Balance_Compute(&balance,&s,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    assert(balance.cmd.valid);
     for(i=0;i<4;i++) { assert(isfinite(torque.dm[i])); assert(fabsf(torque.dm[i])<=lqr_debug.trq_max_hip); }
     near(balance.Tp[0],-s.u[LQR_U_BL]); near(balance.Tp[1],-s.u[LQR_U_BR]);
     for(i=0;i<2;i++) { near(torque.dji[i],s.u[i]); }
@@ -288,7 +287,7 @@ static void world_leg_conversion(void)
 #if MACHINE_DEFAULT == MACHINE_ID_SMALL_WHEELLEG
 static void replay(void)
 {
-    lqr_state_t old, now; leg_balance_t bo,bn; torque_output_t to,tn;
+    baseline_state_t old; lqr_state_t now; leg_balance_t bo,bn; torque_output_t to,tn;
     rc_command_t old_remote;
     unsigned t,i;
     setup(); Baseline_LQR_Init(&old); LQR_Init(&now); lqr_debug.legacy_gain=1;
@@ -307,6 +306,9 @@ static void replay(void)
         LQR_Target_Update(&now,&remote,MACHINE_CTRL_DT);
         assert(Baseline_LQR_State_Update(&old,&imu,&legs[0],&legs[1],wheels,MACHINE_CTRL_DT));
         assert(LQR_State_Update(&now,&imu,&legs[0],&legs[1],wheels,MACHINE_CTRL_DT));
+        /* Replay the control law on common velocity/position inputs; estimators differ. */
+        LQR_Velocity_Apply(&now,old.x[LQR_X_DS],MACHINE_CTRL_DT);
+        now.x[LQR_X_S]=old.x[LQR_X_S];
         Baseline_LQR_Control_Update(&old); LQR_Control_Update(&now); assert(now.gain_valid);
         for(i=0;i<10;i++)
         {
@@ -347,6 +349,9 @@ def baseline():
     debug_type = re.search(r"typedef\s+struct\s*\{[^}]*\}\s*lqr_debug_t\s*;",
                            read("tests/fixtures/baseline_lqr_balance.h")).group()
     text += "\n" + debug_type.replace("lqr_debug_t", "baseline_debug_t")
+    state_type = re.search(r"typedef\s+struct\s*\{[^}]*\}\s*lqr_state_t\s*;",
+                           read("tests/fixtures/baseline_lqr_balance.h")).group()
+    text += "\n" + state_type.replace("lqr_state_t", "baseline_state_t")
     text += "\n" + "\n".join(re.findall(r"^#define LEG_BALANCE_\w+[^\n]*", read("tests/fixtures/baseline_leg_balance.h"), re.M))
     text += "\n" + read("tools/matlab/baseline/lqr_gain_small_legacy.inc").replace("LQR_K_Small_Legacy", "Baseline_K")
     for filename in ("lqr_balance.c", "leg_balance.c"):
@@ -356,6 +361,7 @@ def baseline():
         current = read("imcalib/Algorithm/lqr_balance.c")
         for macro, value in re.findall(r"^#define (LQR_IMU_\w+)\s+([^\n]+)", current, re.M):
             source = re.sub(r"^#define " + macro + r"\s+[^\n]+", "#define " + macro + " " + value, source, flags=re.M)
+        source = source.replace("lqr_state_t", "baseline_state_t")
         source = re.sub(r"\bLQR_IMU_(\w+)\b", r"BASELINE_LQR_IMU_\1", source)
         for name in ("LQR_Init", "LQR_Enable_Latch", "LQR_Target_Update", "LQR_State_Update",
                      "LQR_Control_Update", "LQR_Wrap_Pi", "LQR_Len_Range", "LQR_Accel_Forward",

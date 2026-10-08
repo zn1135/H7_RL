@@ -19,70 +19,83 @@
 #include <string.h>
 
 /* 更新电机状态 */
-static void Motor_State_Update(void)
+static void Motor_State_Update(motor_state_t *next)
 {
-    vTaskSuspendAll();
     for (uint8_t i = 0u; i < DM_MOTOR_NUM; i++)
     {
         const dm_motor_feedback_t *feedback = &dm_motor_feedback[i];
 
-        motor_state.dm.pos_rad[i] = feedback->pos_rad;
-        motor_state.dm.pos_zero_rad[i] = feedback->pos_zero_rad;
-        motor_state.dm.vel_rad_s[i] = feedback->vel_rad_s;
-        motor_state.dm.trq_nm[i] = feedback->trq_nm;
-        motor_state.dm.last_rx_tick[i] = feedback->last_rx_tick;
-        motor_state.dm.parsed_rx_ns[i] = feedback->parsed_rx_ns;
-        motor_state.dm.online[i] = (uint8_t)Dm_Is_Online(i);
+        next->dm.pos_rad[i] = feedback->pos_rad;
+        next->dm.pos_zero_rad[i] = feedback->pos_zero_rad;
+        next->dm.vel_rad_s[i] = feedback->vel_rad_s;
+        next->dm.trq_nm[i] = feedback->trq_nm;
+        next->dm.last_rx_tick[i] = feedback->last_rx_tick;
+        next->dm.parsed_rx_ns[i] = feedback->parsed_rx_ns;
+        next->dm.online[i] = (uint8_t)Dm_Is_Online(i);
     }
-    (void)xTaskResumeAll();
     for (uint8_t i = 0u; i < DJI_MOTOR_NUM; i++)
     {
         const dji_motor_feedback_t *feedback = &dji_motor_feedback[i];
 
-        motor_state.dji.angle_rad[i] = feedback->angle_rad;
-        motor_state.dji.angle_total_rad[i] = feedback->angle_total_rad;
-        motor_state.dji.vel_rad_s[i] = feedback->vel_rad_s;
-        motor_state.dji.current_raw[i] = feedback->current_raw;
-        motor_state.dji.last_rx_tick[i] = feedback->last_rx_tick;
-        motor_state.dji.online[i] = (uint8_t)Dji_Is_Online(i);
+        next->dji.angle_rad[i] = feedback->angle_rad;
+        next->dji.angle_total_rad[i] = feedback->angle_total_rad;
+        next->dji.vel_rad_s[i] = feedback->vel_rad_s;
+        next->dji.current_raw[i] = feedback->current_raw;
+        next->dji.last_rx_tick[i] = feedback->last_rx_tick;
+        next->dji.online[i] = (uint8_t)Dji_Is_Online(i);
     }
-    motor_state.timestamp_ms = HAL_GetTick();
-    motor_state.updated = 1u;
+    next->timestamp_ms = HAL_GetTick();
+    next->updated = 1u;
 }
 
 /* 更新腿部状态 */
-static void Leg_State_Update(void)
+static void Leg_State_Update(const motor_state_t *motor, leg_state_t *left, leg_state_t *right)
 {
-    if (leg_map_l.configured)
+    if (leg_map_l.configured
+        && (uint8_t)leg_map_l.dm_front < DM_MOTOR_NUM && (uint8_t)leg_map_l.dm_rear < DM_MOTOR_NUM)
     {
-        leg_l.input.hip_f = motor_state.dm.pos_zero_rad[leg_map_l.dm_front] + LEG_PI;
-        leg_l.input.hip_b = motor_state.dm.pos_zero_rad[leg_map_l.dm_rear];
-        leg_l.input.d_hip_f = motor_state.dm.vel_rad_s[leg_map_l.dm_front];
-        leg_l.input.d_hip_b = motor_state.dm.vel_rad_s[leg_map_l.dm_rear];
+        left->input.hip_f = motor->dm.pos_zero_rad[leg_map_l.dm_front] + LEG_PI;
+        left->input.hip_b = motor->dm.pos_zero_rad[leg_map_l.dm_rear];
+        left->input.d_hip_f = motor->dm.vel_rad_s[leg_map_l.dm_front];
+        left->input.d_hip_b = motor->dm.vel_rad_s[leg_map_l.dm_rear];
+        (void)Leg_Solve(left);
     }
-    if (leg_map_r.configured)
+    else
     {
-        leg_r.input.hip_f = motor_state.dm.pos_zero_rad[leg_map_r.dm_front] + LEG_PI;
-        leg_r.input.hip_b = motor_state.dm.pos_zero_rad[leg_map_r.dm_rear];
-        leg_r.input.d_hip_f = motor_state.dm.vel_rad_s[leg_map_r.dm_front];
-        leg_r.input.d_hip_b = motor_state.dm.vel_rad_s[leg_map_r.dm_rear];
+        memset(&left->output, 0, sizeof(left->output));
     }
-    vTaskSuspendAll();
-    (void)Leg_Solve(&leg_l);
-    (void)Leg_Solve(&leg_r);
-    (void)xTaskResumeAll();
+    if (leg_map_r.configured
+        && (uint8_t)leg_map_r.dm_front < DM_MOTOR_NUM && (uint8_t)leg_map_r.dm_rear < DM_MOTOR_NUM)
+    {
+        right->input.hip_f = motor->dm.pos_zero_rad[leg_map_r.dm_front] + LEG_PI;
+        right->input.hip_b = motor->dm.pos_zero_rad[leg_map_r.dm_rear];
+        right->input.d_hip_f = motor->dm.vel_rad_s[leg_map_r.dm_front];
+        right->input.d_hip_b = motor->dm.vel_rad_s[leg_map_r.dm_rear];
+        (void)Leg_Solve(right);
+    }
+    else
+    {
+        memset(&right->output, 0, sizeof(right->output));
+    }
 }
 
 /* 更新遥控: 指令解算 + 使能 */
 static void Remote_Control_Update(void)
 {
     dr16_t remote;
+    rc_command_t next;
+    uint8_t rc_enable;
 
     DR16_Process();
     remote = DR16_Snapshot();
-    Rc_Command_Update(&rc_command, &remote);
-    robot_state.rc_enable = strategy_rc_enable(&rc_command);
+    next = rc_command;
+    Rc_Command_Update(&next, &remote);
+    rc_enable = strategy_rc_enable(&next);
+    taskENTER_CRITICAL();
+    rc_command = next;
+    robot_state.rc_enable = rc_enable;
     input_command.mode = remote.online ? remote.s1 : 0u;
+    taskEXIT_CRITICAL();
 }
 
 /* 更新故障状态 */
@@ -203,9 +216,6 @@ static void Robot_Control_Send_Vofa(void)
     static float dbg[VOFA_MAX_CH];
     uint8_t online_mask;
     uint16_t state_bits;
-    uint16_t standup_bits;
-    uint8_t balance;
-    uint8_t i;
 
     memset(dbg, 0, sizeof(dbg));
     /* ch0 在线掩码 */
@@ -231,6 +241,7 @@ static void Robot_Control_Send_Vofa(void)
     state_bits |= output_task_lqr_engaged() ? 0x100u : 0x00u;
     state_bits |= output_task_rl_engaged() ? 0x200u : 0x00u;
     dbg[1] = (float)state_bits;
+    dbg[2] = (float)ctrl_fault;
 
 
     for(int i = 0;i<10;i++)
@@ -248,10 +259,22 @@ static void Robot_Control_Send_Vofa(void)
 /* 通信单周期 */
 void comm_task_body(void)
 {
+    motor_state_t next_motor;
+    leg_state_t next_left;
+    leg_state_t next_right;
+
     Dm_Parse();
     Dji_Parse();
-    Motor_State_Update();
-    Leg_State_Update();
+    next_motor = motor_state;
+    next_left = leg_l;
+    next_right = leg_r;
+    Motor_State_Update(&next_motor);
+    Leg_State_Update(&next_motor, &next_left, &next_right);
+    taskENTER_CRITICAL();
+    motor_state = next_motor;
+    leg_l = next_left;
+    leg_r = next_right;
+    taskEXIT_CRITICAL();
 
     WS2812_RainbowBlink();
     Remote_Control_Update();

@@ -27,11 +27,15 @@ HARNESS = r"""
 #include <assert.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "torque_output.h"
 typedef enum { HAL_OK, HAL_ERROR } HAL_StatusTypeDef;
 static uint8_t torque_output_enabled, output_debug_dm_sent, output_debug_dji_sent;
 static float rl_output_dm_cmd_nm[4], rl_output_wheel_cmd_nm[2];
 static float sent_dm[4], sent_wheel[2];
+static struct { uint8_t drive; } control_frame;
+static uint32_t ctrl_fault;
+#define FAULT_NONE 0u
 static HAL_StatusTypeDef dm_result, wheel_result;
 static HAL_StatusTypeDef Dm_Send_Zero(void)
 {
@@ -56,6 +60,7 @@ int main(void)
 {
     torque_output_t torque = {{1.25f, -2.5f, 3.75f, -4}, {0.2f, -0.35f}, 1};
     unsigned i, enabled, valid;
+    control_frame.drive=1;
     for (enabled = 0; enabled < 2; enabled++)
     {
         for (valid = 0; valid < 2; valid++)
@@ -80,6 +85,15 @@ int main(void)
     assert(!output_debug_dm_sent && output_debug_dji_sent);
     wheel_result = HAL_ERROR; output_dispatch(&torque);
     assert(!output_debug_dm_sent && !output_debug_dji_sent);
+    control_frame.drive=0;output_dispatch(&torque);
+    for(i=0;i<4;i++) { assert(sent_dm[i]==0); }
+    assert(sent_wheel[0]==0 && sent_wheel[1]==0);
+    control_frame.drive=1;ctrl_fault=4;output_dispatch(&torque);
+    for(i=0;i<4;i++) { assert(sent_dm[i]==0); }
+    assert(sent_wheel[0]==0 && sent_wheel[1]==0);
+    ctrl_fault=0;torque.dm[0]=NAN;output_dispatch(&torque);
+    for(i=0;i<4;i++) { assert(sent_dm[i]==0); }
+    assert(sent_wheel[0]==0 && sent_wheel[1]==0);
     return 0;
 }
 """

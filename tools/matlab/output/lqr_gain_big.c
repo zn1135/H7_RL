@@ -3,8 +3,8 @@
  *
  * WBR LQR 最优反馈增益 K(lL, lR) —— 由 tools/matlab/run_all.m 生成, 勿手改。
  *
- * 表号   : big_wheelleg-sjtu5-20261008-2000
- * 生成   : 2026-10-08 20:00   git 7aeba0b
+ * 表号   : big_wheelleg-sjtu5-20261008-2142
+ * 生成   : 2026-10-08 21:42   git 154bdd1
  * 机器   : big_wheelleg (MACHINE_ID_BIG_WHEELLEG)
  * 模型   : sjtu5
  * Q      : diag([600  800   30  100  100  210  100  210  800   10])
@@ -92,7 +92,7 @@ static void eval_big(float lL, float lR, float K_sym[40])
 }
 
 const lqr_gain_desc_t lqr_gain_big = {
-    .table_id = "big_wheelleg-sjtu5-20261008-2000", .model = "sjtu5",
+    .table_id = "big_wheelleg-sjtu5-20261008-2142", .model = "sjtu5",
     .machine_id = MACHINE_ID_BIG_WHEELLEG, .state_schema = LQR_STATE_HIP_FRONT_V2,
     .input_schema = LQR_INPUT_WHEELS_HIPS_V1, .checked = 1u,
     .dt = 0.00100000005F, .len_min = 0.150000006F, .len_max = 0.310000002F,
