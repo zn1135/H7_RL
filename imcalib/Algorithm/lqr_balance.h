@@ -7,7 +7,6 @@
 #include "imu_state.h"
 #include "leg_solver.h"
 #include "simple-function.h"
-#include "kalman.h"
 #include "lqr_gain_table.h"
 
 /* 状态序 — 与 MATLAB 模型一致 */
@@ -36,7 +35,6 @@ enum {
 
 typedef struct {
     float   vel_leg_comp_sign; /* 速度补偿 */
-    uint8_t vel_src;           /* 0 低通 1 卡尔曼 */
     uint8_t yaw_hold;          /* 偏航角环 */
     uint8_t yaw_rate_hold;     /* 偏航角速度环 */
     uint8_t pos_hold;          /* 位移环 (0 = 位移列不进控制) */
@@ -64,8 +62,7 @@ typedef struct {
     uint8_t gain_legacy;
     uint8_t valid;                  /* 状态估计有效 */
     float ds_raw;                   /* 运动学速度 (未滤波) */
-    float ds_lpf;                   /* 低通速度 */
-    float ds_kf;                    /* 卡尔曼速度 */
+    float ds_kf;                    /* 融合速度 */
     float a_fwd;                    /* 前向加速度 m/s² */
     float leg_len_tgt[2];           /* 腿长目标 */
     float pos;                      /* 位移积分 */
@@ -73,8 +70,6 @@ typedef struct {
     float yaw_tgt;                  /* 偏航角目标 */
     float vel_tgt;                  /* 速度目标 */
     float roll;                     /* 机体横滚角 */
-    kalman_accel_t kf_vel;          /* 速度KF */
-    lowpass1d_t lpf_vel;            /* 速度低通 */
     lowpass1d_t lpf_omg_pitch;      /* 俯仰角速度低通 */
     lowpass1d_t lpf_omg_yaw;        /* 偏航角速度低通 */
 } lqr_state_t;

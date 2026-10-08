@@ -1,94 +1,166 @@
+/* 两状态速度补偿：加速度观测、轮速异常降权，不判打滑状态。 */
 #include "slip.h"
 #include <math.h>
 #include <string.h>
 
+#define SLIP_NOISE_DT 0.001f
+
 slip_param_t slip_param = {
-    .gate = 3.0f,              /* σ倍数 */
-    .gate_min = 0.4f,          /* 门限 m/s */
-    .confirm_time = 0.04f,     /* 确认 s */
-    .clear_time = 0.15f,       /* 恢复 s */
-    .clear_ratio = 0.6f,       /* 迟滞比例 */
-    .blank_time = 0.1f,        /* 屏蔽 s */
+    .p0_velocity     = 0.1f,   /* (m/s)² */
+    .p0_acceleration = 0.25f,  /* (m/s²)² */
+    .q_velocity      = 0.007f, /* 每1ms */
+    .q_acceleration  = 0.01f,  /* 每1ms */
+    .r_velocity      = 0.01f,  /* (m/s)² */
+    .r_acceleration  = 0.25f,  /* (m/s²)² */
+    .gate            = 3.0f,   /* σ倍数 */
+    .gate_min        = 0.4f,   /* m/s */
 };
 
+/* 重新等待有效先验 */
 void Slip_Reset(slip_state_t *st)
 {
-    memset(st, 0, sizeof(*st));
-}
-
-/* 标志确认 */
-static void Slip_Detect(slip_state_t *st, float dt)
-{
-    if (st->blank > 0.0f)
+    if (st != NULL)
     {
-        st->blank = fmaxf(0.0f, st->blank - dt);
-        return;
-    }
-    if (slip_param.gate <= 0.0f)
-    {
-        st->suspected = 0u;
-        st->confirm = 0.0f;
-        st->clear = 0.0f;
-        return;
-    }
-    if (st->noise_scale > 1.0f)
-    {
-        st->confirm += dt;
-        st->clear = 0.0f;
-        if (st->confirm >= slip_param.confirm_time)
-        {
-            st->suspected = 1u;
-        }
-    }
-    else
-    {
-        st->confirm = 0.0f;
-        if (fabsf(st->innovation) < st->limit * slip_param.clear_ratio)
-        {
-            st->clear += dt;
-            if (st->clear >= slip_param.clear_time)
-            {
-                st->suspected = 0u;
-            }
-        }
-        else
-        {
-            st->clear = 0.0f;
-        }
+        memset(st, 0, sizeof(*st));
     }
 }
 
-/* 预测与降权融合 */
-float Slip_Update(slip_state_t *st, float wheel_velocity, float acceleration,
-    float dt, float p0, float q, float r, float p_max)
+/* 当前运动学量建先验 */
+void Slip_Init(slip_state_t *st, float v0, float a0)
 {
-    float ratio;
-    float gain;
-
-    if (!st->active)
+    if (st == NULL)
     {
-        Slip_Reset(st);
-        st->covariance = p0;
-        st->blank = slip_param.blank_time;
-        st->active = 1u;
+        return;
     }
-    st->velocity += acceleration * dt;
-    st->covariance = fminf(st->covariance + q, p_max);
-    st->innovation = wheel_velocity - st->velocity;
+    Slip_Reset(st);
+    if (!isfinite(v0) || !isfinite(a0)
+        || !(slip_param.p0_velocity >= 0.0f)
+        || !(slip_param.p0_acceleration >= 0.0f))
+    {
+        return;
+    }
+    st->velocity = v0;
+    st->acceleration = a0;
+    st->covariance[0][0] = slip_param.p0_velocity;
+    st->covariance[1][1] = slip_param.p0_acceleration;
     st->noise_scale = 1.0f;
     st->limit = fmaxf(slip_param.gate_min,
-        slip_param.gate * sqrtf(st->covariance + r));
-    if (slip_param.gate > 0.0f)
+        slip_param.gate * sqrtf(st->covariance[0][0] + slip_param.r_velocity));
+    st->initialized = 1u;
+    st->valid = (uint8_t)(isfinite(st->limit) && st->limit > 0.0f);
+}
+
+/* 单观测Joseph修正 */
+static uint8_t Slip_Correct(slip_state_t *st, uint8_t axis,
+                            float innovation, float noise)
+{
+    float gain[2];
+    float transform[2][2];
+    float result[2][2];
+    float variance;
+    float cross;
+    uint8_t i;
+    uint8_t j;
+    uint8_t m;
+    uint8_t n;
+
+    variance = st->covariance[axis][axis] + noise;
+    if (!(noise > 0.0f) || !isfinite(variance) || variance <= 0.0f)
     {
-        ratio = fabsf(st->innovation) / st->limit;
-        if (ratio > 1.0f)
+        return 0u;
+    }
+    for (i = 0u; i < 2u; i++)
+    {
+        gain[i] = st->covariance[i][axis] / variance;
+        for (j = 0u; j < 2u; j++)
         {
-            st->noise_scale = ratio * ratio;
+            transform[i][j] = (i == j ? 1.0f : 0.0f)
+                - (j == axis ? gain[i] : 0.0f);
         }
     }
-    gain = st->covariance / (st->covariance + r * st->noise_scale);
-    st->velocity += gain * st->innovation;
-    st->covariance *= 1.0f - gain;
-    Slip_Detect(st, dt);
-    return st->velocity;
+    st->velocity += gain[0] * innovation;
+    st->acceleration += gain[1] * innovation;
+    for (i = 0u; i < 2u; i++)
+    {
+        for (j = 0u; j < 2u; j++)
+        {
+            result[i][j] = gain[i] * noise * gain[j];
+            for (m = 0u; m < 2u; m++)
+            {
+                for (n = 0u; n < 2u; n++)
+                {
+                    result[i][j] += transform[i][m] * st->covariance[m][n]
+                        * transform[j][n];
+                }
+            }
+        }
+    }
+    cross = 0.5f * (result[0][1] + result[1][0]);
+    result[0][1] = cross;
+    result[1][0] = cross;
+    memcpy(st->covariance, result, sizeof(result));
+    return (uint8_t)(isfinite(st->velocity) && isfinite(st->acceleration)
+        && isfinite(result[0][0]) && isfinite(result[1][1]) && isfinite(cross)
+        && result[0][0] >= 0.0f && result[1][1] >= 0.0f);
+}
+
+/* 预测、加速度修正、轮速降权修正 */
+uint8_t Slip_Update(slip_state_t *st, float wheel_v, float imu_acc, float dt)
+{
+    float p00;
+    float p01;
+    float p10;
+    float p11;
+    float scale;
+    float ratio;
+    float noise;
+
+    if (st == NULL)
+    {
+        return 0u;
+    }
+    st->valid = 0u;
+    if (!isfinite(wheel_v) || !isfinite(imu_acc) || !isfinite(dt) || dt <= 0.0f
+        || !(slip_param.q_velocity >= 0.0f) || !(slip_param.q_acceleration >= 0.0f)
+        || !(slip_param.r_velocity > 0.0f) || !(slip_param.r_acceleration > 0.0f)
+        || !(slip_param.gate > 0.0f) || !(slip_param.gate_min > 0.0f))
+    {
+        Slip_Reset(st);
+        return 0u;
+    }
+    if (!st->initialized)
+    {
+        Slip_Init(st, wheel_v, imu_acc);
+        return st->valid;
+    }
+    scale = dt / SLIP_NOISE_DT;
+    p00 = st->covariance[0][0] + dt * (st->covariance[0][1] + st->covariance[1][0])
+        + dt * dt * st->covariance[1][1] + slip_param.q_velocity * scale;
+    p01 = st->covariance[0][1] + dt * st->covariance[1][1];
+    p10 = st->covariance[1][0] + dt * st->covariance[1][1];
+    p11 = st->covariance[1][1] + slip_param.q_acceleration * scale;
+    st->velocity += st->acceleration * dt;
+    st->covariance[0][0] = p00;
+    st->covariance[0][1] = p01;
+    st->covariance[1][0] = p10;
+    st->covariance[1][1] = p11;
+    if (!Slip_Correct(st, 1u, imu_acc - st->acceleration, slip_param.r_acceleration))
+    {
+        Slip_Reset(st);
+        return 0u;
+    }
+    st->innovation = wheel_v - st->velocity;
+    st->limit = fmaxf(slip_param.gate_min,
+        slip_param.gate * sqrtf(st->covariance[0][0] + slip_param.r_velocity));
+    ratio = fabsf(st->innovation) / st->limit;
+    st->noise_scale = fmaxf(1.0f, ratio * ratio);
+    noise = slip_param.r_velocity * st->noise_scale;
+    if (!isfinite(st->limit) || st->limit <= 0.0f
+        || !Slip_Correct(st, 0u, st->innovation, noise))
+    {
+        Slip_Reset(st);
+        return 0u;
+    }
+    st->valid = 1u;
+    return 1u;
 }

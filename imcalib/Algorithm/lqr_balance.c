@@ -45,7 +45,6 @@ void LQR_Init(lqr_state_t *st)
     memset(st, 0, sizeof(*st));
     lqr_debug.vel_leg_comp_sign = -1.0f;
     lqr_debug.legacy_gain = 0u;
-    lqr_debug.vel_src = machine->lqr.vel_src;
     lqr_debug.yaw_hold = machine->lqr.yaw_hold;
     lqr_debug.yaw_rate_hold = machine->lqr.yaw_rate_hold;
     lqr_debug.pos_hold = machine->lqr.pos_hold;
@@ -59,11 +58,8 @@ void LQR_Init(lqr_state_t *st)
     lqr_debug.trq_max_hip = machine->dm_trq_clamp;
     st->len_eval[0] = -1.0f;
     st->len_eval[1] = -1.0f;
-    Lowpass_Init(&st->lpf_vel, machine->lqr.lpf_alpha[0]);
-    Lowpass_Init(&st->lpf_omg_pitch, machine->lqr.lpf_alpha[1]);
-    Lowpass_Init(&st->lpf_omg_yaw, machine->lqr.lpf_alpha[2]);
-    Kalman_Accel_Init(&st->kf_vel, 0.0f, machine->lqr.kf_p0,
-        machine->lqr.kf_q, machine->lqr.kf_r, machine->lqr.kf_p_max);
+    Lowpass_Init(&st->lpf_omg_pitch, machine->lqr.lpf_alpha[0]);
+    Lowpass_Init(&st->lpf_omg_yaw, machine->lqr.lpf_alpha[1]);
 }
 
 /* 前向加速度: 四元数把机体加速度转到世界系, 去重力, 投影到车头水平方向 */
@@ -176,7 +172,7 @@ void LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt)
         return;
     }
     st->ds_kf = velocity;
-    st->x[LQR_X_DS] = lqr_debug.vel_src ? velocity : st->ds_lpf;
+    st->x[LQR_X_DS] = velocity;
     legs_ready = (uint8_t)(fabsf(LQR_Wrap_Pi(st->x[LQR_X_THL]
         - machine->lqr.leg_trim[0])) <= LQR_POS_LEG_TOL
         && fabsf(LQR_Wrap_Pi(st->x[LQR_X_THR]
@@ -214,7 +210,7 @@ void LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt)
     }
 }
 
-/* 状态估计: 每拍必算, 有效性写 st->valid 并返回 */
+/* 组装姿态和运动学观测；任务随后赋入融合速度。 */
 uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
                          const leg_state_t *leg_l, const leg_state_t *leg_r,
                          const float wheel_vel[2], float dt)
@@ -306,17 +302,14 @@ uint8_t LQR_State_Update(lqr_state_t *st, const imu_state_t *imu,
            - leg_r->output.virtual_leg_length * st->x[LQR_X_DTHR]
              * cosf(st->x[LQR_X_THR])
            - leg_r->output.d_virtual_leg_length * sinf(st->x[LQR_X_THR]);
-    /* 速度估计两条并行: 低通 / 卡尔曼 (加速度预测 + 运动学观测), vel_src 选一条进 x[1] */
+    /* 组装速度观测，融合由执行任务调用slip模块。 */
     st->ds_raw = (vel[0] + vel[1]) * 0.5f;
-    st->ds_lpf = Lowpass_Update(&st->lpf_vel, st->ds_raw);
     st->a_fwd  = lqr_debug.acc_fwd_sign * LQR_Accel_Forward(imu);
     if (!isfinite(st->ds_raw) || !isfinite(st->a_fwd))
     {
         return 0u;
     }
     st->valid = 1u;
-    st->ds_kf = Kalman_Accel_Update(&st->kf_vel, st->a_fwd, st->ds_raw, dt);
-    LQR_Velocity_Apply(st, st->ds_kf, dt);
     return st->valid;
 }
 

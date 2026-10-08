@@ -90,15 +90,10 @@ typedef struct {
     float yaw_max;
     float len_rate;
     float pos_arm_vel;
-    float lpf_alpha[3];             /* 三路低通 */
-    float kf_p0;
-    float kf_q;
-    float kf_r;
-    float kf_p_max;
+    float lpf_alpha[2];             /* pitch/yaw角速 */
     machine_pid_cfg_t leg_len[2];
     machine_pid_cfg_t roll;
     float support_force[2];
-    uint8_t vel_src;
     uint8_t yaw_hold;
     uint8_t yaw_rate_hold;
     uint8_t pos_hold;

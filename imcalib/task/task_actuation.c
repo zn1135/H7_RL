@@ -7,6 +7,7 @@
 #include "joint_usb.h"
 #include "gas_spring.h"
 #include "standup.h"
+#include "slip.h"
 #include <math.h>
 
 /*
@@ -17,6 +18,7 @@
  * 改输出行为 (总开关 / 限幅 / 斜坡 / 极性) 只动 output_dispatch(); 改控制律只动 solve_*()
  */
 
+static slip_state_t slip_control;
 static uint8_t lqr_running;     /* 已投入 */
 static uint8_t rl_engaged;      /* RL 已投入 */
 static uint8_t rl_wait_ticks;   /* 执行分频 */
@@ -194,12 +196,32 @@ static ctrl_strategy_t strategy_from_remote(const rc_command_t *cmd)
     return CTRL_STRATEGY_DISABLE;
 }
 
-/* 原速度估计 */
-static void Control_State_Update(void)
+/* 组装观测、速度补偿、位置积分 */
+static void Control_State_Update(uint8_t reset_velocity)
 {
-    (void)LQR_State_Update(&lqr_state, &control_frame.imu,
+    if (!LQR_State_Update(&lqr_state, &control_frame.imu,
         &control_frame.left, &control_frame.right,
-        control_frame.wheel_vel, MACHINE_LQR_DT);
+        control_frame.wheel_vel, MACHINE_LQR_DT))
+    {
+        Slip_Reset(&slip_control);
+        return;
+    }
+    if (reset_velocity || !slip_control.initialized)
+    {
+        Slip_Init(&slip_control, lqr_state.ds_raw, lqr_state.a_fwd);
+    }
+    else
+    {
+        (void)Slip_Update(&slip_control, lqr_state.ds_raw,
+            lqr_state.a_fwd, MACHINE_LQR_DT);
+    }
+    if (!slip_control.valid)
+    {
+        lqr_state.valid = 0u;
+        Slip_Reset(&slip_control);
+        return;
+    }
+    LQR_Velocity_Apply(&lqr_state, slip_control.velocity, MACHINE_LQR_DT);
 }
 
 /* LQR 投入锁存 */
@@ -220,7 +242,7 @@ static uint8_t lqr_engage_update(void)
             saved_debug = lqr_debug;
             LQR_Init(&lqr_state);
             lqr_debug = saved_debug;
-            Control_State_Update();
+            Control_State_Update(1u);
             standup_control.recovered = 0u;
         }
         /* 使能沿: 锁腿长目标 (不查实测腿长, 同 Leg2) */
@@ -366,7 +388,7 @@ void output_task_body(void)
     /* 1 估计与融合 */
     if (LQR_Gain_Compatible())
     {
-        Control_State_Update();
+        Control_State_Update(0u);
     }
 
     /* 2 求解: torque 默认全零 valid=0, 只有走通的分支才置 valid */

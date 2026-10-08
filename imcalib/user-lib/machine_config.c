@@ -16,25 +16,20 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
         .lqr = {
             .dt = 0.001f,                            /* 周期 s */
             .leg_len_init = {0.15f, 0.15f},           /* 初始腿长 m */
-            .leg_trim = {-0.06f, -0.06f},             /* 摆角目标 rad */
+            .leg_trim = {-0.0f, -0.0f},             /* 摆角目标 rad */
             .pitch_trim = 0.0f,                      /* 俯仰目标 rad */
             .pos_target = 0.0f,                      /* 位移目标 m */
             .vel_max = 3.0f,                         /* 速度上限 m/s */
             .yaw_max = 5.0f,                         /* 转速上限 rad/s */
             .len_rate = 0.3f,                        /* 腿长速率 m/s */
             .pos_arm_vel = 0.1f,                     /* 松杆低速门槛 */
-            /* 低通顺序: 前向速度 / 俯仰角速度 / 偏航角速度 */
-            .lpf_alpha = {0.3f, 0.3f, 0.3f},
-            .kf_p0 = 0.1f,                           /* 初始方差 */
-            .kf_q = 0.007f,                          /* 过程方差 */
-            .kf_r = 0.01f,                           /* 观测方差 */
-            .kf_p_max = 0.5f,                        /* 方差上限 */
+            /* 角速度低通顺序: pitch / yaw */
+            .lpf_alpha = {0.3f, 0.3f},
             /* PID 顺序: Kp / Ki / Kd / 输出限幅 / 积分限幅; 输出单位 N */
             .leg_len = {{800.0f, 0.0f, 15000.0f, 5000.0f, 0.0f},
                         {800.0f, 0.0f, 15000.0f, 5000.0f, 0.0f}}, /* 左右腿长 */
             .roll = {500.0f, 0.0f, 100.0f, 5000.0f, 0.0f}, /* 横滚补偿 */
             .support_force = {20.534f * 9.81f * 0.5f, 20.534f * 9.81f * 0.5f}, /* 支撑前馈 N */
-            .vel_src = 1u,                           /* 0低通1KF */
             .yaw_hold = 1u,                          /* 偏航角环 */
             .yaw_rate_hold = 1u,                     /* 偏航角速环 */
             .pos_hold = 1u,                          /* 位移环 */
@@ -99,13 +94,12 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
             .pitch_trim = 0.0f, .pos_target = 0.10f,
             .vel_max = 1.2f, .yaw_max = 5.0f, .len_rate = 0.3f,
             .pos_arm_vel = 0.0f,
-            .lpf_alpha = {0.3f, 0.3f, 0.3f},
-            .kf_p0 = 0.1f, .kf_q = 0.007f, .kf_r = 0.01f, .kf_p_max = 0.5f,
+            .lpf_alpha = {0.3f, 0.3f},
             .leg_len = {{2500.0f, 0.0f, 10000.0f, 5000.0f, 0.0f},
                         {2500.0f, 0.0f, 10000.0f, 5000.0f, 0.0f}},
             .roll = {200.0f, 0.0f, 50.0f, 5000.0f, 0.0f},
             .support_force = {8.0f, 8.0f},
-            .vel_src = 1u, .yaw_hold = 1u, .yaw_rate_hold = 1u,
+            .yaw_hold = 1u, .yaw_rate_hold = 1u,
             .pos_hold = 1u, .wheel_enable = 1u, .hip_enable = 1u,
             .len_pid_enable = 1u,
         },

@@ -232,55 +232,15 @@ static void Robot_Control_Send_Vofa(void)
     state_bits |= output_task_rl_engaged() ? 0x200u : 0x00u;
     dbg[1] = (float)state_bits;
 
-    dbg[2] = (float)ctrl_fault;
-    dbg[3] = (float)standup_control.phase;
-    dbg[4] = (float)standup_control.fault;
-    dbg[5] = standup_control.elapsed * 1000.0f;
-    dbg[6] = standup_control.stable * 1000.0f;
-    standup_bits  = standup_control.enabled ? 0x0001u : 0x00u;
-    standup_bits |= standup_control.need ? 0x0002u : 0x00u;
-    standup_bits |= standup_control.recovery_enabled ? 0x0004u : 0x00u;
-    standup_bits |= standup_control.recovered ? 0x0008u : 0x00u;
-    standup_bits |= standup_control.prepare.valid ? 0x0010u : 0x00u;
-    standup_bits |= imu_state.pitch_world_valid ? 0x0020u : 0x00u;
-    standup_bits |= lqr_state.valid ? 0x0040u : 0x00u;
-    standup_bits |= lqr_state.gain_valid ? 0x0080u : 0x00u;
-    standup_bits |= output_debug_dm_sent ? 0x0100u : 0x00u;
-    standup_bits |= output_debug_dji_sent ? 0x0200u : 0x00u;
-    standup_bits |= leg_l.output.force_valid ? 0x0400u : 0x00u;
-    standup_bits |= leg_r.output.force_valid ? 0x0800u : 0x00u;
-    dbg[7] = (float)standup_bits;
-    dbg[8] = (float)standup_control.ready_block;
-    dbg[9] = (float)standup_control.retry;
-    dbg[10] = (float)standup_control.pose;
-    dbg[11] = imu_state.pitch_world;
-    dbg[12] = imu_state.euler_rad[1];
-    dbg[13] = imu_state.euler_rad[0];
-    dbg[14] = imu_state.gyro_rad_s[1];
-    dbg[15] = standup_control.upright;
-    dbg[16] = standup_control.support;
-    dbg[17] = leg_l.output.virtual_leg_length;
-    dbg[18] = leg_r.output.virtual_leg_length;
-    balance = output_task_lqr_engaged();
-    for (i = 0u; i < 2u; i++)
+
+    for(int i = 0;i<10;i++)
     {
-        dbg[19u + i] = balance ? lqr_state.leg_len_tgt[i] : standup_control.length_cmd[i];
-        dbg[23u + i] = balance ? machine->lqr.leg_trim[i] + imu_state.euler_rad[1]
-            : standup_control.angle_cmd[i];
-        dbg[27u + i] = balance ? leg_balance.F[i] : standup_control.force[i];
-        dbg[29u + i] = balance ? leg_balance.Tp[i] : standup_control.tp[i];
-        dbg[35u + i] = rl_output_wheel_cmd_nm[i];
+        dbg[i + 3] = lqr_state.x[i];
     }
-    dbg[21] = leg_l.output.virtual_leg_angle;
-    dbg[22] = leg_r.output.virtual_leg_angle;
-    dbg[25] = leg_l.output.d_virtual_leg_angle;
-    dbg[26] = leg_r.output.d_virtual_leg_angle;
-    for (i = 0u; i < DM_MOTOR_NUM; i++)
+    for(int i = 0;i<10;i++)
     {
-        dbg[31u + i] = rl_output_dm_cmd_nm[i];
+        dbg[i + 13] = lqr_state.target[i];
     }
-    dbg[37] = (float)(motor_state.timestamp_ms & 0x00FFFFFFu);
-    dbg[38] = standup_param.stable_time * 1000.0f;
     (void)Vofa_Send(dbg, VOFA_MAX_CH);
 }
 
