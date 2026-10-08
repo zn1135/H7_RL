@@ -58,7 +58,8 @@ task_imu.c: imu_task_body() @ 约 1kHz (imuTask osDelay(1))
     imu_state.pitch_world / pitch_world_valid → 翻倒检测（无效保护）
   lqr_balance.c:
     euler_rad[PITCH/ROLL/YAW], gyro_rad_s[1]/[2] → 俯仰、横滚、偏航角、俯仰/偏航角速度
-    quat + acc_g → 前向加速度 (LQR_Accel_Forward, 速度卡尔曼输入)
+    quat + acc_g → 世界系水平分量 → 车头水平投影a_fwd (LQR_Accel_Forward, 速度融合输入)
+      当前大机在wx/wy公式中直接反转Y/Z项；小机保持原式，公共IMU标定保持
 ```
 
 **IMU 安装极性在机器表（`machine_config.c` 的 `.imu`，2026-09-21 从 `hi229.h` 全局宏搬入）：**

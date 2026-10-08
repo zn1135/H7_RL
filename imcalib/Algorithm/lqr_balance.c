@@ -78,7 +78,6 @@ static float LQR_Accel_Forward(const imu_state_t *imu)
     float wx;
     float wy;
     float norm;
-
     q0 = imu->quat[0];
     q1 = imu->quat[1];
     q2 = imu->quat[2];
@@ -91,8 +90,13 @@ static float LQR_Accel_Forward(const imu_state_t *imu)
     r12 = 2.0f * (q2 * q3 - q0 * q1);
 
     /* 世界系水平分量 (重力只在 z, 水平不用减) */
+#if MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG
+    wx = r00 * imu->acc_g[0] - r01 * imu->acc_g[1] - r02 * imu->acc_g[2];
+    wy = r10 * imu->acc_g[0] - r11 * imu->acc_g[1] - r12 * imu->acc_g[2];
+#else
     wx = r00 * imu->acc_g[0] + r01 * imu->acc_g[1] + r02 * imu->acc_g[2];
     wy = r10 * imu->acc_g[0] + r11 * imu->acc_g[1] + r12 * imu->acc_g[2];
+#endif
     /* 车头方向 = 机体 x 轴在水平面的投影 */
     norm = sqrtf(r00 * r00 + r10 * r10);
     if (norm < 1.0e-3f)

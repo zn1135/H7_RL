@@ -241,6 +241,7 @@ static void Robot_Control_Send_Vofa(void)
     {
         dbg[i + 13] = lqr_state.target[i];
     }
+    dbg[23] = lqr_state.a_fwd;
     (void)Vofa_Send(dbg, VOFA_MAX_CH);
 }
 
