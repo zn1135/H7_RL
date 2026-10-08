@@ -2,6 +2,8 @@
 
 > 2026-10-08当前交接：自起到位持稳后，同拍直接交给原LQR求解及唯一输出口。blend、blend_time及渐入函数已删除，不保留对照开关。新的39通道自起诊断页及到位阻塞位见 [VOFA通道定义](vofa_policy_trace.md)。下文历史参数快照中的blend字段不再适用。
 
+> 2026-10-08当前摆正到位：腿长到位由RETRACT的retract_ready_len门槛保证。SWING只检查两腿实际／指令摆角及roll窗口，持稳满足stable_time后接管；腿长环仍持续向retract_len出力，后续实际腿长变化不清到位计时。length_tol及其摆正阻塞位已移除，旧参数快照不适用。
+
 > 2026-10-08：基于d37e2f1仅移除自起/翻倒恢复的独立roll PID及左右F差动力，包括相关权重、速率和状态字段。正常LQR的roll辅助环保留；roll姿态分类、触发及到位窗口保持。腿长单环、原支撑前馈渐入、输出混合交接、K表及物理映射均未调整。下方roll恢复控制章节为历史实现，相关差动力字段已不可用。
 
 `imcalib/Algorithm/standup.c/h` 是唯一自起模块，沿原执行任务1kHz运行；不新增任务、反馈解算或通信入口。当前包含正立准备及俯仰翻倒／仰卧恢复第一轮试验；明显侧躺或混合大侧偏只分类后停止，尚未执行侧躺扶正。
@@ -38,7 +40,7 @@
 
 当前流程为 `IDLE → EXTEND → REAR → RETRACT → SWING → DONE`，phase为 `0 → 6 → 5 → 1 → 2 → 3`。已伸足可跳过EXTEND，已在后摆窗口可跳过REAR；原RETRACT的0.19m摆腿切入门槛保留。收腿PID目标 `retract_len` 保持0.15m；新增 `retract_ready_len` 是切入摆腿门槛，当前0.19m。两腿都≤门槛就立即开始摆腿，不再要求长度误差±length_tol、伸缩速度低、目标长度到位或额外保持100ms。进入时已经满足门槛可直接SWING；摆腿期间长度目标也保持retract_len；接入后LQR仍使用各机器原站立长度。数值以源码为准。
 
-到位统一由Standup_Ready判断：EXTEND两腿实际长度≥有效extend_len−extend_tol并保持stable_time；REAR两腿沿选定路径的连续几何角和目标都到rear_goal±rear_tol并保持stable_time后转段；RETRACT两腿实际长度≤retract_ready_len就切入摆腿。SWING检查两腿实际／指令长度误差≤length_tol、摆角误差≤angle_tol及abs(roll)≤roll_ready，连续满足stable_time后交接，不检查支撑渐入是否完成。到位判据不检查pitch速度或腿长／摆角速度；世界pitch姿态保护保留。参数数值以源码为准。
+到位统一由Standup_Ready判断：EXTEND两腿实际长度≥有效extend_len−extend_tol并保持stable_time；REAR两腿沿选定路径的连续几何角和目标都到rear_goal±rear_tol并保持stable_time后转段；RETRACT两腿实际长度≤retract_ready_len就切入摆腿。SWING只检查两腿实际／指令摆角误差≤angle_tol及abs(roll)≤roll_ready，连续满足stable_time后交接，不再要求腿长仍保持retract_len误差窗口，也不检查支撑渐入是否完成。两腿长度PD及retract_len目标继续保持，有限反馈、执行许可及世界pitch姿态保护保留。参数数值以源码为准。
 
 自起没有独立pitch纠偏环；自起摆角环已不使用pitch／gyro作坐标换算或速度反馈；原LQR仍按原定义使用它们。世界pitch仍用于自起触发、准备姿态保护和公共翻倒保护，输入有效标志保留。本轮只简化交接到位判定，不改反馈坐标或公共保护。支撑角度窗口仍为STANDUP_SUPPORT_ANGLE_RANGE=0.6rad，支撑力计算不改。
 

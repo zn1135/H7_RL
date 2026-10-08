@@ -7,6 +7,8 @@
 
 #define LQR_GRAVITY         9.81f
 #define LQR_K_RECALC_THRESH 0.0005f
+#define LQR_POS_LEG_TOL     0.1f    /* 腿角偏差rad */
+#define LQR_POS_RESET_DIST  3.5f    /* 重定基距离m */
 
 /*
  * IMU 轴索引 — 台架第一步必须确认
@@ -117,7 +119,7 @@ uint8_t LQR_Enable_Latch(lqr_state_t *st, const leg_state_t *leg_l,
     st->vel_tgt = 0.0f;
     /* 只清位移积分; 滤波器每拍都在跑, 已是热态, 不复位 */
     st->pos = 0.0f;
-    st->pos_armed = 1u;
+    st->pos_armed = 0u;
     st->x[LQR_X_S] = 0.0f;
     return 1u;
 }
@@ -163,9 +165,11 @@ uint8_t LQR_Target_Update(lqr_state_t *st, const rc_command_t *cmd, float dt)
     return 1u;
 }
 
-/* 消费速度结果 */
+/* 速度入状态；低速、腿姿态到位后启动位置保持。 */
 void LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt)
 {
+    uint8_t legs_ready;
+
     if (!isfinite(velocity))
     {
         st->valid = 0u;
@@ -173,18 +177,28 @@ void LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt)
     }
     st->ds_kf = velocity;
     st->x[LQR_X_DS] = lqr_debug.vel_src ? velocity : st->ds_lpf;
-    /* 位移积分: 有速度指令时清零并撤防; 目标回零后车速降到 pos_arm_vel 以下才开始积 (0 = 立即) */
+    legs_ready = (uint8_t)(fabsf(LQR_Wrap_Pi(st->x[LQR_X_THL]
+        - machine->lqr.leg_trim[0])) <= LQR_POS_LEG_TOL
+        && fabsf(LQR_Wrap_Pi(st->x[LQR_X_THR]
+        - machine->lqr.leg_trim[1])) <= LQR_POS_LEG_TOL);
     if (st->target[LQR_X_DS] != 0.0f)
     {
         st->pos = 0.0f;
         st->pos_armed = 0u;
     }
-    else
+    else if (fabsf(st->pos) >= LQR_POS_RESET_DIST)
+    {
+        st->pos = 0.0f;
+        st->pos_armed = 0u;
+    }
+    else if (legs_ready)
     {
         if (!st->pos_armed
             && (lqr_debug.pos_arm_vel <= 0.0f
                 || fabsf(st->x[LQR_X_DS]) < lqr_debug.pos_arm_vel))
         {
+            /* 此刻设为位置基准 */
+            st->pos = 0.0f;
             st->pos_armed = 1u;
         }
         if (st->pos_armed)
@@ -192,6 +206,7 @@ void LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt)
             st->pos += st->x[LQR_X_DS] * dt;
         }
     }
+    /* 腿姿态偏离只冻结，不清除已累计位移。 */
     st->x[LQR_X_S] = st->pos;
     if (!isfinite(st->pos) || !isfinite(st->x[LQR_X_DS]))
     {

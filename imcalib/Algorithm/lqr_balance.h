@@ -42,7 +42,7 @@ typedef struct {
     uint8_t pos_hold;          /* 位移环 (0 = 位移列不进控制) */
     float   acc_fwd_sign;      /* 前向加速度符号 */
     float   pitch_comp_sign;   /* 轮速补偿俯仰项符号 */
-    float   pos_arm_vel;       /* 松杆后车速低于此才积位移 m/s (0 = 立即) */
+    float   pos_arm_vel;       /* 首次积分速度门槛m/s；0不检查速度 */
     uint8_t wheel_enable;      /* 轮通道 */
     uint8_t hip_enable;        /* 髋通道 */
     uint8_t len_pid_enable;    /* 腿长PID */
@@ -69,7 +69,7 @@ typedef struct {
     float a_fwd;                    /* 前向加速度 m/s² */
     float leg_len_tgt[2];           /* 腿长目标 */
     float pos;                      /* 位移积分 */
-    uint8_t pos_armed;              /* 位移积分已启动 */
+    uint8_t pos_armed;              /* 位置基准已锁 */
     float yaw_tgt;                  /* 偏航角目标 */
     float vel_tgt;                  /* 速度目标 */
     float roll;                     /* 机体横滚角 */

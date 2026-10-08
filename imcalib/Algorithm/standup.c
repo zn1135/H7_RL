@@ -24,15 +24,14 @@ standup_param_t standup_param = {
     .rear_angle              = -1.5f,                           /* 后点 rad */
     .rear_tol                = 0.1f,                            /* 容差 rad */
     .rear_rate               = 5.1f,                            /* 目标 rad/s */
-    .rear_timeout            = 4.0f,                            /* 超时 s */
+    .rear_timeout            = 1.0f,                            /* 超时 s */
 
     /* 收腿与站立 */
     .retract_len             = 0.15f,                           /* 目标 m */
-    .retract_ready_len       = 0.16f,                           /* 转摆 m */
-    .length_tol              = 0.03f,                           /* 容差 m */
+    .retract_ready_len       = 0.17f,                           /* 转摆 m */
     .angle_tol               = 0.2f,                            /* 容差 rad */
     .roll_ready              = 0.3f,                            /* 到位 rad */
-    .timeout                 = {2.0f, 3.0f},                    /* 收/摆 s */
+    .timeout                 = {1.5f, 1.5f},                    /* 收/摆 s */
 
     /* 摆角串级PD */
     .angle_pos_kp            = 25.0f,                           /* 位置 P */
@@ -312,15 +311,6 @@ static uint8_t Standup_Ready(standup_ctx_t *st,
     }
     for (i = 0u; i < 2u; i++)
     {
-        length_goal = standup_param.retract_len;
-        if (fabsf(leg[i]->output.virtual_leg_length - length_goal) > standup_param.length_tol)
-        {
-            st->ready_block |= (uint16_t)(1u << i);
-        }
-        if (fabsf(st->length_cmd[i] - length_goal) > standup_param.length_tol)
-        {
-            st->ready_block |= (uint16_t)(1u << (2u + i));
-        }
         if (st->phase == STANDUP_SWING)
         {
             angle_error = Standup_Wrap(leg[i]->output.virtual_leg_angle

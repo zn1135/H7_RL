@@ -125,6 +125,41 @@ static inline void follow(void)
 """
 
 CHECKS = {
+    'swing_ready_after_retract': r"""
+int main(void)
+{
+    unsigned i;
+    setup(standup_param.rear_angle);step();assert(standup_control.phase==STANDUP_RETRACT);
+    leg_l.output.virtual_leg_length=standup_param.retract_ready_len-.001f;
+    leg_r.output.virtual_leg_length=standup_param.retract_ready_len+.001f;step();
+    assert(standup_control.phase==STANDUP_RETRACT && standup_control.ready_block==2 && standup_control.tp[0]==0);
+    leg_r.output.virtual_leg_length=standup_param.retract_len;step();
+    assert(standup_control.phase==STANDUP_SWING);
+    leg_l.output.virtual_leg_length=.254394f;leg_r.output.virtual_leg_length=.255116f;
+    leg_l.output.virtual_leg_angle=-.103682f;leg_r.output.virtual_leg_angle=-.111971f;
+    imu_state.pitch_world=imu_state.euler_rad[1]=.557913f;imu_state.euler_rad[0]=.014841f;
+    for(i=0;i<20;i++)
+    {
+        step();assert(standup_control.phase==STANDUP_SWING && !lqr_running);
+        assert(standup_control.ready_block==0 && standup_control.length_cmd[0]==standup_param.retract_len);
+        assert(standup_control.length_pid[0].err[NOW]<-.1f);
+    }
+    leg_r.output.virtual_leg_angle=machine->lqr.leg_trim[1]+standup_param.angle_tol+.01f;step();
+    assert(standup_control.stable==0 && standup_control.ready_block==32);
+    leg_r.output.virtual_leg_angle=-.111971f;imu_state.euler_rad[0]=standup_param.roll_ready+.01f;step();
+    assert(standup_control.stable==0 && standup_control.ready_block==256 && !lqr_running);
+    imu_state.euler_rad[0]=.014841f;
+    for(i=0;i<300 && standup_control.phase==STANDUP_SWING;i++)
+    {
+        step();assert(standup_control.length_cmd[0]==standup_param.retract_len);
+        assert(standup_control.ready_block==0);
+    }
+    assert(i>=49 && i<=52 && standup_control.phase==STANDUP_DONE && lqr_running);
+    assert(standup_control.support<1 && fabsf(sent_wheel[0]-leg_balance.cmd.dji[0])<1e-6f);
+    rc_command.s2=DR16_SW_UP;step();zero();
+    return 0;
+}
+""",
     'direct_handoff': r"""
 int main(void)
 {
@@ -150,12 +185,12 @@ int main(void)
     standup_control.length_cmd[0]=standup_control.length_cmd[1]=standup_param.retract_len;
     standup_control.angle_cmd[0]=machine->lqr.leg_trim[0];standup_control.angle_cmd[1]=machine->lqr.leg_trim[1];
     assert(Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==0);
-    leg_l.output.virtual_leg_length+=standup_param.length_tol+.01f;
-    standup_control.length_cmd[1]+=standup_param.length_tol+.01f;
+    leg_l.output.virtual_leg_length+=.04f;
+    standup_control.length_cmd[1]+=.04f;
     leg_l.output.virtual_leg_angle+=standup_param.angle_tol+.01f;
     standup_control.angle_cmd[1]+=standup_param.angle_tol+.01f;
     imu_state.euler_rad[0]=standup_param.roll_ready+.01f;
-    assert(!Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==409u);
+    assert(!Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==400u);
     Standup_Reset(&standup_control);assert(standup_control.ready_block==0);
     setup(standup_param.rear_angle);step();
     for(i=0;i<2000 && standup_control.phase!=STANDUP_SWING;i++) { follow();step(); }
@@ -387,17 +422,19 @@ int main(void)
     standup_control.length_cmd[1]=standup_param.retract_len;
     standup_control.angle_cmd[0]=machine->lqr.leg_trim[0];
     standup_control.angle_cmd[1]=machine->lqr.leg_trim[1];
-    leg_l.output.virtual_leg_length=standup_param.retract_len+.039f;
-    leg_r.output.virtual_leg_length=standup_param.retract_len+.039f;
+    leg_l.output.virtual_leg_length=.25f;
+    leg_r.output.virtual_leg_length=.27f;
     leg_l.output.virtual_leg_angle=machine->lqr.leg_trim[0]+standup_param.angle_tol-.001f;
     leg_r.output.virtual_leg_angle=machine->lqr.leg_trim[1]+standup_param.angle_tol-.001f;
     assert(Standup_Ready(&standup_control,&imu_state,legs));
-    leg_r.output.virtual_leg_length=standup_param.retract_len+.041f;
-    assert(!Standup_Ready(&standup_control,&imu_state,legs));
-    leg_r.output.virtual_leg_length=standup_param.retract_len+.039f;
+    standup_control.length_cmd[0]=.30f;
+    assert(Standup_Ready(&standup_control,&imu_state,legs));
     leg_r.output.virtual_leg_angle=machine->lqr.leg_trim[1]+standup_param.angle_tol+.001f;
     assert(!Standup_Ready(&standup_control,&imu_state,legs));
     leg_r.output.virtual_leg_angle=machine->lqr.leg_trim[1]+standup_param.angle_tol-.001f;
+    standup_control.angle_cmd[1]=machine->lqr.leg_trim[1]+standup_param.angle_tol+.001f;
+    assert(!Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==128u);
+    standup_control.angle_cmd[1]=machine->lqr.leg_trim[1];
     imu_state.pitch_world=.4f;imu_state.gyro_rad_s[1]=5.0f;
     leg_l.output.d_virtual_leg_length=leg_r.output.d_virtual_leg_length=2.0f;
     leg_l.output.d_virtual_leg_angle=leg_r.output.d_virtual_leg_angle=5.0f;

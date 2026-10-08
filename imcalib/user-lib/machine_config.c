@@ -22,7 +22,7 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
             .vel_max = 3.0f,                         /* 速度上限 m/s */
             .yaw_max = 5.0f,                         /* 转速上限 rad/s */
             .len_rate = 0.3f,                        /* 腿长速率 m/s */
-            .pos_arm_vel = 0.0f,                     /* 积分门槛 m/s */
+            .pos_arm_vel = 0.1f,                     /* 松杆低速门槛 */
             /* 低通顺序: 前向速度 / 俯仰角速度 / 偏航角速度 */
             .lpf_alpha = {0.3f, 0.3f, 0.3f},
             .kf_p0 = 0.1f,                           /* 初始方差 */

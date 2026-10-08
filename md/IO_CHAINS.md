@@ -655,3 +655,12 @@ motor_state.dji.vel_rad_s          rc_command (commTask 已解算)
 ## 2026-10-06 · 许可与恢复链
 
 Comm先汇总ctrl_fault，再更新有效姿态fallen，调用执行层Robot_Control_Enable_Allowed决定使能；数据失效是硬故障，fallen是恢复需求。Actuation每拍Control_Frame_Read复制同一份输入和许可，估计／LQR／standup／RL取本拍快照，最终output_dispatch统一处理有效性、最新硬故障／总开关和六路有限值。standup可在允许的fallen姿态执行7～10恢复；正常LQR/RL不放开倒置，USB独立权限保持。
+
+
+## 2026-10-08 停车位置积分门控
+
+按作者确认参考Leg3/lhx，当前速度估计仍为原普通KF/低通，打滑模块不接入，速度目标继续直接使用遥控命令。行进时清位移并撤销位置基准；松杆后首次积分需满足pos_arm_vel低速条件及左右世界腿角相对本机leg_trim的偏差窗口。大机pos_arm_vel改为0.1m/s，小机既有值保持。腿角窗口LQR_POS_LEG_TOL位于lqr_balance.c，当前0.1rad。
+
+首次满足窗口时将当前点作为零位移基准；启动后速度再次变大不重复清零，腿姿态偏离只冻结累计位移，回到窗口继续累计。保留参考的3.5m超限重定基，随后重新等待首次投入条件。LQR投入沿pos_armed初始化为0，避免绕过首次低速检查。位置保持反馈使用冻结后的已有误差，未另加PID或模式任务。
+
+该处理用于减少制动位移导致的停车后回拉；不额外提供制动力，不保证滑行距离缩短。没有加入速度目标滤波/斜坡，Q/R/K、IMU映射和电机限幅未改。8项小范围逻辑核验和双机GCC/AC5对象编译完成，未下载或验证实机效果。

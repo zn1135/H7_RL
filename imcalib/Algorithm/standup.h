@@ -72,7 +72,6 @@ typedef struct {
     float trigger_angle;
     float trigger_pitch;
     float angle_tol;
-    float length_tol;
     float pitch_max;
     float roll_max;
     float stable_time;
