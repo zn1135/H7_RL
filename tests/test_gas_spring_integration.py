@@ -54,6 +54,7 @@ HEADERS = r"""
 #include <string.h>
 #include "machine_config.h"
 #include "gas_spring.h"
+#include "gravity_comp.h"
 #include "pid.h"
 #include "simple-function.h"
 #include "kalman.h"
@@ -70,6 +71,9 @@ const machine_cfg_t *const machine = &fixture_machine;
 lqr_debug_t lqr_debug;
 typedef enum { HAL_OK, HAL_ERROR } HAL_StatusTypeDef;
 static uint8_t torque_output_enabled, output_debug_dm_sent, output_debug_dji_sent;
+static compensation_debug_t compensation_debug;
+#define taskENTER_CRITICAL() ((void)0)
+#define taskEXIT_CRITICAL() ((void)0)
 static volatile float rl_output_dm_cmd_nm[4], rl_output_wheel_cmd_nm[2];
 static float fixture_sent_dm[4], fixture_sent_wheel[2];
 static HAL_StatusTypeDef fixture_dm_status;
@@ -404,7 +408,7 @@ static void lqr_force_survives_length_gate(void)
     lqr_debug.trq_max_hip = 2.0f;
     make_lqr(&state, &balance);
     assert(run_lqr(&state, &balance, &torque));
-    assert(fabsf(balance.leg_len[0].pos_out) > 1.0f);
+    assert(fabsf(balance.leg_len[0].pos_out) > 0.1f);
     for (side = 0u; side < 2u; side++)
     {
         force = machine->lqr.support_force[side] + expected_force(leg[side]);
@@ -440,7 +444,8 @@ static void lqr_pid_baseline(void)
     leg_balance_t balance;
     torque_output_t torque;
     const leg_state_t *leg[2];
-    float force[2], roll, error, expected[2];
+    float force[2], roll, error, expected[2], tg;
+    gravity_leg_result_t gravity;
     unsigned side, i, prime;
 
     for (prime = 0u; prime < 2u; prime++)
@@ -454,6 +459,9 @@ static void lqr_pid_baseline(void)
         for (side = 0u; side < 2u; side++)
         {
             error = state.leg_len_tgt[side] - leg[side]->output.virtual_leg_length;
+            error = (leg[side]->output.virtual_leg_length
+                + reference_clip(error, machine->lqr.len_rate * MACHINE_CTRL_DT))
+                - leg[side]->output.virtual_leg_length;
             force[side] = (machine->lqr.leg_len[side].kp
                 + (prime ? 0.0f : machine->lqr.leg_len[side].kd)) * error
                 + (side == 0u ? roll : -roll) + machine->lqr.support_force[side];
@@ -462,7 +470,14 @@ static void lqr_pid_baseline(void)
         for (side = 0u; side < 2u; side++)
         {
             near(balance.F[side], force[side]);
-            assert(Leg_Force_Map_Forward(leg[side], force[side] + expected_force(leg[side]), -state.u[LQR_U_BL + side], expected));
+            tg = 0.0f;
+            if (machine->gravity != NULL)
+            {
+                assert(Gravity_Comp_Compute(machine->gravity, leg[side]->output.virtual_leg_length,
+                    state.x[LQR_X_THL + side * 2u], &gravity));
+                tg = gravity.torque;
+            }
+            assert(Leg_Force_Map_Forward(leg[side], force[side] + expected_force(leg[side]), -state.u[LQR_U_BL + side] + tg, expected));
             for (i = 0u; i < 2u; i++)
             {
                 near(torque.dm[side * 2u + i], reference_clip(expected[i], lqr_debug.trq_max_hip));
@@ -681,10 +696,14 @@ class GasSpringIntegrationTest(unittest.TestCase):
             production_function(read("imcalib/user-lib/dji.c"), "Dji_Torque_To_Current"),
             production_function(read("imcalib/user-lib/dm.c"), "Dm_Float_To_Uint"),
             without_includes(read("imcalib/Algorithm/gas_spring.c")),
+            without_includes(read("imcalib/Algorithm/gravity_comp.c")),
             rl_preamble,
             *[production_function(rl_source, name) for name in (
                 "RL_Torque_Array_Finite", "RL_Torque_State_Init", "RL_Torque_Compute")],
             without_includes(read("imcalib/Algorithm/leg_balance.c")),
+            "static compensation_debug_t pending_compensation;\nstatic uint8_t ctrl_strategy;\n"
+            "static struct { uint8_t drive; } control_frame = {1};\nstatic uint32_t ctrl_fault;\n"
+            "#define FAULT_NONE 0\n#define CTRL_STRATEGY_COMPENSATION 4\n",
             production_function(read("imcalib/task/task_actuation.c"), "output_dispatch"),
             HARNESS,
         ]
@@ -701,6 +720,7 @@ class GasSpringIntegrationTest(unittest.TestCase):
                     "-I", str(folder), "-I", str(ROOT / "imcalib/Algorithm"),
                     "-I", str(ROOT / "imcalib/user-lib"), str(harness),
                     str(ROOT / "imcalib/Algorithm/leg_solver.c"), str(ROOT / "imcalib/user-lib/pid.c"),
+                    str(ROOT / "imcalib/user-lib/simple-function.c"),
                     "-lm", "-o", str(executable),
                 ], capture_output=True, text=True, env=cls.environment)
                 if result.returncode:

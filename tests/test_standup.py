@@ -1,5 +1,6 @@
 """Real standalone recovery and unchanged balance chain with scripted feedback."""
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,7 +26,8 @@ static struct { struct { unsigned selected_model; } policy;
     rl_torque_param_t torque_param[1]; rl_torque_state_t torque_state; } rl_control;
 static volatile ctrl_strategy_t ctrl_strategy;
 static uint32_t ctrl_fault;
-static uint8_t torque_output_enabled, gas_spring_only_enabled;
+static uint8_t torque_output_enabled;
+static compensation_debug_t compensation_debug;
 static uint8_t rl_fixture_ok;
 static uint8_t output_debug_dm_sent, output_debug_dji_sent;
 static float sent_dm[4], sent_wheel[2];
@@ -48,7 +50,6 @@ static int HAL_TIM_Base_Start_IT(int *t) { (void)t; return HAL_OK; }
 static void Error_Handler(void) { assert(0); }
 static uint64_t Mono_Ns_Get(void) { return now_ns; }
 static uint8_t JointUsb_ModeLock(void) { return 0; }
-static uint8_t JointUsb_PhysicalPermit(void) { return 1; }
 static uint8_t JointUsb_EnableAllowed(void) { return 0; }
 static uint8_t JointUsb_StreamRequested(void) { return 0; }
 static void JointUsb_Compute(torque_output_t *t) { (void)t; }
@@ -91,7 +92,7 @@ static void setup(float angle)
     memset(&leg_l,0,sizeof(leg_l)); memset(&leg_r,0,sizeof(leg_r));
     memset(&imu_state,0,sizeof(imu_state)); memset(&robot_state,0,sizeof(robot_state));
     memset(&rc_command,0,sizeof(rc_command));memset(sent_dm,0,sizeof(sent_dm));memset(sent_wheel,0,sizeof(sent_wheel));
-    ctrl_fault=gas_spring_only_enabled=0;torque_output_enabled=1;
+    ctrl_fault=0;torque_output_enabled=1;
     lqr_running=rl_engaged=rl_wait_ticks=0;
     rc_command.online=1;rc_command.s1=rc_command.s2=DR16_SW_MID;
     imu_state.online=1;imu_state.quat[0]=1;imu_state.acc_g[2]=1;
@@ -142,7 +143,7 @@ int main(void)
     {
         step();assert(standup_control.phase==STANDUP_SWING && !lqr_running);
         assert(standup_control.ready_block==0 && standup_control.length_cmd[0]==standup_param.retract_len);
-        assert(standup_control.length_pid[0].err[NOW]<-.1f);
+        assert(standup_control.length_pid[0].set[NOW]>=standup_control.length_cmd[0]);
     }
     leg_r.output.virtual_leg_angle=machine->lqr.leg_trim[1]+standup_param.angle_tol+.01f;step();
     assert(standup_control.stable==0 && standup_control.ready_block==32);
@@ -156,7 +157,7 @@ int main(void)
     }
     assert(i>=49 && i<=52 && standup_control.phase==STANDUP_DONE && lqr_running);
     assert(standup_control.support<1 && fabsf(sent_wheel[0]-leg_balance.cmd.dji[0])<1e-6f);
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -171,7 +172,7 @@ int main(void)
     assert(fabsf(sent_wheel[0]-leg_balance.cmd.dji[0])<1e-6f);
     for(j=0;j<4;j++) { assert(fabsf(sent_dm[j]-leg_balance.cmd.dm[j])<1e-6f); }
     lqr_state.K[0][0]=NAN;step();zero();assert(standup_control.fault==STANDUP_BAD_INPUT);
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -253,7 +254,7 @@ int main(void)
     assert(standup_control.phase==STANDUP_FAILED && standup_control.fault==STANDUP_BAD_POSE);
     setup(.5f);imu_state.quat[0]=0;imu_state.quat[2]=1;imu_state.pitch_world=LEG_PI;step();
     assert(standup_control.phase==STANDUP_SETTLE);
-    rc_command.s2=DR16_SW_UP;step();zero();return 0;
+    rc_command.s2=DR16_SW_DOWN;step();zero();return 0;
 }
 """,
     'normal_and_final_gate': r"""
@@ -338,7 +339,7 @@ int main(void)
     step();assert(lqr_state.valid);
     standup_control.enabled=0;step();assert(lqr_state.valid);
     assert(lqr_state.x[LQR_X_DS]==lqr_state.ds_kf);
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -407,7 +408,7 @@ int main(void)
     setup(0);standup_control.enabled=0;imu_state.euler_rad[0]=.2f;step();
     assert(lqr_running && leg_balance.roll.pos_out<0);
     assert(leg_balance.F[0]<leg_balance.F[1]);
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -440,7 +441,7 @@ int main(void)
     leg_l.output.d_virtual_leg_angle=leg_r.output.d_virtual_leg_angle=5.0f;
     standup_control.support=0;
     assert(Standup_Ready(&standup_control,&imu_state,legs));
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -457,7 +458,7 @@ int main(void)
     leg_l.output.valid=0;assert(!Standup_Input_Valid(&imu_state,legs));leg_l.output.valid=1;
     leg_r.output.force_valid=0;assert(!Standup_Input_Valid(&imu_state,legs));leg_r.output.force_valid=1;
     assert(!Standup_Input_Valid(NULL,legs));
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -498,7 +499,7 @@ int main(void)
     assert(standup_control.phase==STANDUP_SWING);
     for(i=0;i<500 && standup_control.phase!=STANDUP_DONE;i++) { follow();step(); }
     assert(standup_control.phase==STANDUP_DONE);
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -528,7 +529,7 @@ int main(void)
         assert(Standup_Need(&imu_state,legs));
         imu_state.pitch_world=0;
     }
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -568,11 +569,11 @@ int main(void)
     imu_state.pitch_world=0;assert(Standup_Ready(&standup_control,&imu_state,legs));
     standup_control.phase=STANDUP_SWING;
     first=standup_control;second=standup_control;
-    assert(Standup_PID_Calculate(&first,&imu_state,legs,MACHINE_LQR_DT) && Standup_Torque_Output(&first,legs));imu_state.pitch_world=0.6f;imu_state.euler_rad[1]=-.5f;imu_state.gyro_rad_s[1]=5;
-    assert(Standup_PID_Calculate(&second,&imu_state,legs,MACHINE_LQR_DT) && Standup_Torque_Output(&second,legs));
+    assert(Standup_PID_Calculate(&first,legs,MACHINE_LQR_DT) && Standup_Torque_Output(&first,&imu_state,legs));imu_state.pitch_world=0.6f;imu_state.euler_rad[1]=-.5f;imu_state.gyro_rad_s[1]=5;
+    assert(Standup_PID_Calculate(&second,legs,MACHINE_LQR_DT) && Standup_Torque_Output(&second,&imu_state,legs));
     assert(memcmp(first.force,second.force,sizeof(first.force))==0);
     assert(memcmp(first.tp,second.tp,sizeof(first.tp))==0);
-    assert(memcmp(first.prepare.dm,second.prepare.dm,sizeof(first.prepare.dm))==0);
+    assert((memcmp(first.prepare.dm,second.prepare.dm,sizeof(first.prepare.dm))==0) == (machine->gravity==NULL));
     imu_state.pitch_world_valid=0;assert(!Standup_Input_Valid(&imu_state,legs));
     return 0;
 }
@@ -632,7 +633,7 @@ int main(void)
         }
         assert(i<4200 && phases[1] && phases[2] && phases[3]);
         assert(lqr_running && lqr_state.target[LQR_X_DS]>0);
-        rc_command.s2=DR16_SW_UP;step();zero();assert(standup_control.phase==STANDUP_IDLE);
+        rc_command.s2=DR16_SW_DOWN;step();zero();assert(standup_control.phase==STANDUP_IDLE);
         assert(standup_control.enabled);
     }
     return 0;
@@ -653,7 +654,7 @@ int main(void)
     rc_command.vel=0;
     for(i=0;i<110;i++) { step(); }
     assert(standup_control.phase==STANDUP_REAR && standup_control.need && !lqr_running);
-    rc_command.s2=DR16_SW_UP;step();zero();
+    rc_command.s2=DR16_SW_DOWN;step();zero();
     return 0;
 }
 """,
@@ -780,8 +781,82 @@ int main(void)
 """,
 }
 
+GRAVITY_CHECK = r"""
+static void check_sum(const compensation_debug_t *debug, const float *base,
+                      const float *sent, float bound)
+{
+    unsigned i;
+    for(i=0;i<4;i++) {
+        float raw=base[i]+debug->spring_dm[i]+debug->gravity.delta_dm[i];
+        assert(fabsf(debug->raw_dm[i]-raw)<.00003f);
+        assert(fabsf(sent[i]-clampf(raw,-bound,bound))<.00003f);
+    }
+}
+int main(void)
+{
+    const leg_state_t *legs[2]={&leg_l,&leg_r};
+    float base[4],tp,expected;
+    unsigned side,i;
+    setup(.5f);imu_state.pitch_world=.2f;imu_state.euler_rad[1]=.2f;
+    standup_control.force[0]=10;standup_control.force[1]=15;
+    standup_control.tp[0]=1;standup_control.tp[1]=-2;
+    assert(Standup_Torque_Output(&standup_control,&imu_state,legs));
+    for(side=0;side<2;side++) {
+        assert(Leg_Force_Map_Forward(legs[side],standup_control.force[side],standup_control.tp[side],&base[2*side]));
+        if(machine->gravity) {
+            expected=1.408f*9.81f*machine->gravity->nodes[15].radius
+                *sinf(.3f-machine->gravity->nodes[15].offset);
+            assert(fabsf(standup_control.compensation.gravity.leg[side].torque-expected)<1e-6f);
+        }
+    }
+    check_sum(&standup_control.compensation,base,standup_control.prepare.dm,machine->dm_trq_clamp);
+    standup_control.enabled=0;step();assert(lqr_running);
+    for(side=0;side<2;side++) {
+        assert(Leg_Force_Map_Forward(legs[side],leg_balance.F[side],leg_balance.Tp[side],&base[2*side]));
+        if(machine->gravity) {
+            assert(fabsf(leg_balance.compensation.gravity.leg[side].torque-expected)<1e-6f);
+        }
+    }
+    check_sum(&leg_balance.compensation,base,sent_dm,lqr_debug.trq_max_hip);
+    if(machine->gravity) {
+        assert(compensation_debug.gravity.valid);
+        lqr_debug.hip_enable=0;step();assert(leg_balance.Tp[0]==0 && leg_balance.Tp[1]==0);
+        assert(leg_balance.compensation.gravity.valid);
+    }
+    setup(machine_table[MACHINE_DEFAULT].lqr.leg_trim[0]);
+    standup_control.phase=STANDUP_DONE;step();assert(lqr_running);
+    assert(!memcmp(&compensation_debug.gravity,&leg_balance.compensation.gravity,sizeof(gravity_comp_result_t)));
+    if(machine->gravity) {
+        assert(!standup_control.compensation.gravity.valid);
+        rc_command.s2=DR16_SW_UP;step();
+        assert(ctrl_strategy==CTRL_STRATEGY_COMPENSATION && !lqr_running && !rl_engaged);
+        assert(standup_control.phase==STANDUP_IDLE && compensation_debug.gravity.valid && compensation_debug.bench);
+        for(side=0;side<2;side++) {
+            tp=compensation_debug.gravity.leg[side].torque;
+            assert(Leg_Force_Map_Forward(legs[side],-Leg_SpringF(legs[side]->output.virtual_leg_length),tp,&base[side*2]));
+        }
+        for(i=0;i<4;i++) {assert(fabsf(sent_dm[i]-clampf(base[i],-machine->dm_trq_clamp,machine->dm_trq_clamp))<.00003f);}
+        assert(sent_wheel[0]==0 && sent_wheel[1]==0);
+        leg_r.output.force_valid=0;step();zero();assert(!compensation_debug.gravity.valid);
+        leg_r.output.force_valid=1;step();assert(compensation_debug.gravity.valid);
+        torque_output_enabled=0;step();zero();assert(!compensation_debug.gravity.valid);
+        torque_output_enabled=1;rc_command.s2=DR16_SW_DOWN;step();zero();
+    }
+    rc_command.s1=DR16_SW_UP;rc_command.s2=DR16_SW_MID;action_state.rl_ready=rl_fixture_ok=1;
+    step();assert(!compensation_debug.gravity.valid);
+    return 0;
+}
+"""
+
+
 class StandupTest(unittest.TestCase):
     def test_real_controller_and_selector(self):
+        self.run_cases(CHECKS)
+
+    def test_gravity_in_self_lqr_bench_and_hand_off(self):
+        self.run_cases({"gravity_chain": GRAVITY_CHECK})
+
+    def run_cases(self, cases):
         compiler=os.environ.get('CC') or shutil.which('gcc')
         if compiler is None:self.skipTest('set CC to host gcc')
         env=os.environ.copy();env['PATH']=str(Path(compiler).parent)+os.pathsep+env.get('PATH','')
@@ -793,17 +868,20 @@ class StandupTest(unittest.TestCase):
                      'imcalib/Algorithm/standup.h','imcalib/Algorithm/slip.h'):
             headers.append(without_includes(read(path)))
         headers.append(production_enum(read('imcalib/task/inc/robot_control.h'),'ctrl_strategy_t'))
+        headers.append(re.search(r'typedef struct \{\s*ctrl_strategy_t strategy;[^}]*\} rc_control_mode_t;',
+            read('imcalib/task/inc/robot_control.h')).group())
         config=without_includes(read('imcalib/user-lib/machine_config.c')).split('const machine_cfg_t *const machine')[0]
         split=FIXTURE.index('static void zero(')
         content='\n'.join(headers)+'\n'+config+'\n'+FIXTURE[:split]
         for path in ('imcalib/Algorithm/lqr_balance.c','imcalib/Algorithm/leg_balance.c','imcalib/Algorithm/gas_spring.c',
+                     'imcalib/Algorithm/gravity_comp.c',
                      'imcalib/Algorithm/standup.c','imcalib/task/task_actuation.c'):
             content+='\n'+without_includes(read(path))
         content+='\n'+production_function(read('imcalib/task/task_comm.c'),'Robot_Fallen_Update')
         content+='\n'+production_function(read('imcalib/task/task_comm.c'),'Robot_Enable_Update')+'\n'+FIXTURE[split:]
         with tempfile.TemporaryDirectory(prefix='standup-host-') as temp:
             folder=Path(temp);(folder/'arm_math.h').write_text(ARM_MATH_SHIM,encoding='utf-8')
-            for name,checks in CHECKS.items():
+            for name,checks in cases.items():
                 source=folder/(name+'.c');source.write_text(content+checks,encoding='utf-8')
                 for machine in (0,1):
                     with self.subTest(case=name,machine=machine):

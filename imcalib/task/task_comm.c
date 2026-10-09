@@ -98,6 +98,7 @@ static void Remote_Control_Update(void)
     taskEXIT_CRITICAL();
 }
 
+
 /* 更新故障状态 */
 static void Robot_Fault_Update(void)
 {
@@ -216,6 +217,14 @@ static void Robot_Control_Send_Vofa(void)
     static float dbg[VOFA_MAX_CH];
     uint8_t online_mask;
     uint16_t state_bits;
+    struct {
+        compensation_debug_t compensation;
+        float command[DM_MOTOR_NUM];
+        float feedback[DM_MOTOR_NUM];
+        float length[2];
+    } snapshot;
+    uint8_t motor_index;
+    uint8_t compensation_bits;
 
     memset(dbg, 0, sizeof(dbg));
     /* ch0 在线掩码 */
@@ -253,6 +262,34 @@ static void Robot_Control_Send_Vofa(void)
         dbg[i + 13] = lqr_state.target[i];
     }
     dbg[23] = lqr_state.a_fwd;
+    taskENTER_CRITICAL();
+    snapshot.compensation = compensation_debug;
+    for (motor_index = 0u; motor_index < DM_MOTOR_NUM; motor_index++)
+    {
+        snapshot.command[motor_index] = rl_output_dm_cmd_nm[motor_index];
+        snapshot.feedback[motor_index] = motor_state.dm.trq_nm[motor_index];
+    }
+    snapshot.length[0] = leg_l.output.virtual_leg_length;
+    snapshot.length[1] = leg_r.output.virtual_leg_length;
+    taskEXIT_CRITICAL();
+    for (motor_index = 0u; motor_index < 2u; motor_index++)
+    {
+        dbg[24u + motor_index] = snapshot.compensation.gravity.leg[motor_index].torque;
+        dbg[26u + motor_index] = snapshot.compensation.gravity.leg[motor_index].world_angle;
+    }
+    for (motor_index = 0u; motor_index < DM_MOTOR_NUM; motor_index++)
+    {
+        dbg[28u + motor_index] = snapshot.command[motor_index];
+        dbg[32u + motor_index] = snapshot.feedback[motor_index];
+    }
+    dbg[36] = snapshot.length[0];
+    dbg[37] = snapshot.length[1];
+    compensation_bits = snapshot.compensation.gravity.valid ? 0x01u : 0u;
+    compensation_bits |= snapshot.compensation.bench ? 0x02u : 0u;
+    compensation_bits |= snapshot.compensation.gravity.leg[0].clamped ? 0x04u : 0u;
+    compensation_bits |= snapshot.compensation.gravity.leg[1].clamped ? 0x08u : 0u;
+    compensation_bits |= snapshot.compensation.saturated ? 0x10u : 0u;
+    dbg[38] = (float)compensation_bits;
     (void)Vofa_Send(dbg, VOFA_MAX_CH);
 }
 

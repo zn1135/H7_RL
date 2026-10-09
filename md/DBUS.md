@@ -1,5 +1,22 @@
 # DBUS 遥控器解析
 
+## 当前拨杆模式入口
+
+2026-10-09：所有三挡拨杆语义集中在 `task_actuation.c` 顶部的 `Control_Mode_Decode()`。以后修改左/右组合只改这里；DR16与rc_command仍只负责解析和传递。其返回 `rc_control_mode_t`：strategy为选中策略，rc_enable为模型许可，engage为投入请求（不是实际出力），usb_permit为左上右下USB许可，usb_reset为左下清USB锁请求。
+
+| 左 | 右 | 行为 |
+|---|---|---|
+| 中 | 上 | 仅气弹簧＋重力，缺模型失能 |
+| 中 | 中 | 自起/LQR投入 |
+| 中 | 下 | LQR已选但零力矩 |
+| 上 | 中 | RL投入 |
+| 上 | 上 | RL已选但零力矩 |
+| 上 | 下 | 既有USB物理许可，仍须协议使能与锁规则 |
+| 下 | 任意 | 失能并清USB锁 |
+| 离线 | 任意 | 失能，无投入或USB许可 |
+
+同一模式区的 `strategy_from_mode()`只负责USB锁优先和最终策略；`Robot_Control_Enable_Allowed()`只组合故障、翻倒恢复与使能许可。执行任务每拍将解码结果放入control_frame.mode，自起重置/投入及RL投入只读strategy/engage，不再检查s1/s2。`strategy_rc_enable()`保留旧接口，仅返回统一解码的rc_enable。USB模块读取同一解码的许可/复位结果，不再定义自己的挡位条件。参数、零力矩挡位及所有原保护规则保持。
+
 > 配合文件：[`dr16.h`](../imcalib/user-lib/dr16.h)、[`dr16.c`](../imcalib/user-lib/dr16.c)
 
 ---
@@ -104,7 +121,8 @@ DR16_Parse: 解析 18 字节 → dr16_t
 | s1 MID | 3 | `DR16_SW_LEFT_MID` | 选 LQR（需 `machine->lqr_configured`，`task_actuation.c:80-81`）；计入 `rc_enable`（`strategy_rc_enable()`，`task_actuation.c`） |
 | s1 UP | 1 | `DR16_SW_LEFT_UP` | 选 RL（需 `machine->rl.configured`，`task_actuation.c:82-83`）；计入 `rc_enable`（`strategy_rc_enable()`，`task_actuation.c`）；RL 挡（`ctrl_strategy == CTRL_STRATEGY_RL`）动作过期或已投入但动作持续不可用（`rl_ready` 持续 0）≥100ms → `FAULT_ACTION`（`Robot_Fault_Update()`，2026-09-25） |
 | s2 MID | 3 | `DR16_SW_RIGHT_MID` | 投入出力（LQR：`task_actuation.c:180`；RL：`task_actuation.c:193`） |
-| s2 UP/DOWN | 1/2 | `DR16_SW_RIGHT_UP/DOWN` | 已选模式但零力矩（不投入） |
+| s2 UP | 1 | `DR16_SW_RIGHT_UP` | 左中时仅弹簧＋完整重力、轮零；缺模型或USB锁不回落LQR。其他非USB模式零力矩 |
+| s2 DOWN | 2 | `DR16_SW_RIGHT_DOWN` | 左中时零力矩；既有左上右下USB许可保持 |
 
 > 离线 / 使能判定为 0（`strategy_rc_enable()`）→ `CTRL_STRATEGY_DISABLE`（`strategy_from_remote()` 先判 `robot_state.rc_enable`，`task_actuation.c`）；LQR 投入还依赖电机使能 + IMU 在线 + 两腿有效（`task_actuation.c:94-96`）。
 

@@ -155,8 +155,7 @@ static uint8_t limits_valid(void)
 
 uint8_t JointUsb_PhysicalPermit(void)
 {
-    return (uint8_t)(rc_command.online && rc_command.s1 == DR16_SW_UP
-                     && rc_command.s2 == DR16_SW_DOWN);
+    return Control_Mode_Decode(&rc_command).usb_permit;
 }
 
 uint8_t JointUsb_ModeLock(void)
@@ -466,6 +465,7 @@ void JointUsb_Process(void)
     uint16_t tail;
     uint8_t byte;
     uint64_t byte_ns;
+    rc_control_mode_t mode;
 
     if (vofa_transport.active == VOFA_TRANSPORT_USB)
     {
@@ -480,7 +480,8 @@ void JointUsb_Process(void)
         rx_overflow = 0u;
         return;
     }
-    if (rc_command.s1 == DR16_SW_DOWN)
+    mode = Control_Mode_Decode(&rc_command);
+    if (mode.usb_reset)
     {
         armed = 0u;
         latched = 0u;

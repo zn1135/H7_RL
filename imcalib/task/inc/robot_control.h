@@ -37,8 +37,16 @@ typedef enum {
     CTRL_STRATEGY_LQR,          /* LQR 平衡 */
     CTRL_STRATEGY_DISABLE,      /* 左下 / 离线 */
     CTRL_STRATEGY_JOINT_USB,    /* USB 台架 */
-    CTRL_STRATEGY_GAS_SPRING,  /* 弹簧台架 */
+    CTRL_STRATEGY_COMPENSATION, /* 补偿台架 */
 } ctrl_strategy_t;
+
+typedef struct {
+    ctrl_strategy_t strategy;
+    uint8_t rc_enable;
+    uint8_t engage;
+    uint8_t usb_permit;
+    uint8_t usb_reset;
+} rc_control_mode_t;
 
 typedef struct {
     float pos_rad[DM_MOTOR_NUM];        /* 解码角 */
@@ -132,7 +140,7 @@ extern volatile control_time_debug_t control_time_debug;
 extern volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 extern volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
 extern uint8_t torque_output_enabled;
-extern volatile uint8_t gas_spring_only_enabled;
+extern volatile compensation_debug_t compensation_debug;
 extern osSemaphoreId ctrl_tick_sem_handle;
 extern osSemaphoreId policy_tick_sem_handle;
 
@@ -154,6 +162,7 @@ uint8_t output_task_lqr_engaged(void);
 uint8_t output_task_rl_engaged(void);
 /* 遥控使能唯一判定 */
 uint8_t strategy_rc_enable(const rc_command_t *cmd);
+rc_control_mode_t Control_Mode_Decode(const rc_command_t *cmd);
 void comm_task_body(void);
 
 #endif

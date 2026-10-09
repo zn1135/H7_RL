@@ -1,5 +1,7 @@
 # 独立自起模块
 
+> 2026-10-09：所有自起/翻身腿长目标在腿长PD计算前调用公共Ramp_Target_Update，斜率复用machine->lqr.len_rate。左右各保存斜坡输出，首次从实际腿长起步，此后从上一拍输出推进；length_cmd仍是原始最终目标，阶段到位与超时判断保持。len_history_ready只预置PD历史，不重置已初始化的斜坡；Standup_Reset重新初始化控制器。Watch查看length_pid[i].set[NOW]或length_ramp[i].out获得实际送入PD的目标。软件核验不代表实机效果。
+
 > 2026-10-08当前交接：自起到位持稳后，同拍直接交给原LQR求解及唯一输出口。blend、blend_time及渐入函数已删除，不保留对照开关。新的39通道自起诊断页及到位阻塞位见 [VOFA通道定义](vofa_policy_trace.md)。下文历史参数快照中的blend字段不再适用。
 
 > 2026-10-08当前摆正到位：腿长到位由RETRACT的retract_ready_len门槛保证。SWING只检查两腿实际／指令摆角及roll窗口，持稳满足stable_time后接管；腿长环仍持续向retract_len出力，后续实际腿长变化不清到位计时。length_tol及其摆正阻塞位已移除，旧参数快照不适用。

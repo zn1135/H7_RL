@@ -9,6 +9,7 @@
 #include "standup.h"
 #include "slip.h"
 #include <math.h>
+#include <string.h>
 
 /*
  * 输出任务三层结构 (作者 2026-09-22 定: 解算只算, 分发唯一):
@@ -27,6 +28,7 @@ typedef struct {
     leg_state_t left;
     leg_state_t right;
     rc_command_t rc;
+    rc_control_mode_t mode;
     float wheel_vel[2];
     uint8_t drive;
     uint8_t normal;
@@ -34,21 +36,92 @@ typedef struct {
 } control_frame_t;
 
 static control_frame_t control_frame;
+static compensation_debug_t pending_compensation;
 volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];
 volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];
+
+/* ================= 拨杆模式: 唯一解码 ================= */
+rc_control_mode_t Control_Mode_Decode(const rc_command_t *cmd)
+{
+    rc_control_mode_t mode;
+
+    memset(&mode, 0, sizeof(mode));
+    mode.strategy = CTRL_STRATEGY_DISABLE;
+    if (cmd == NULL)
+    {
+        return mode;
+    }
+    mode.usb_reset = (uint8_t)(cmd->s1 == DR16_SW_DOWN);
+    if (!cmd->online)
+    {
+        return mode;
+    }
+    switch (cmd->s1)
+    {
+    case DR16_SW_MID:
+        if (cmd->s2 == DR16_SW_UP)
+        {
+            mode.rc_enable = (uint8_t)(GAS_SPRING_COMP_ENABLE
+                && machine->spring != NULL && machine->gravity != NULL);
+            mode.strategy = mode.rc_enable
+                ? CTRL_STRATEGY_COMPENSATION : CTRL_STRATEGY_DISABLE;
+            mode.engage = 1u;
+        }
+        else
+        {
+            mode.strategy = CTRL_STRATEGY_LQR;
+            mode.rc_enable = LQR_Ready();
+            mode.engage = (uint8_t)(cmd->s2 == DR16_SW_MID);
+        }
+        break;
+
+    case DR16_SW_UP:
+        mode.strategy = CTRL_STRATEGY_RL;
+        mode.rc_enable = machine->rl.configured ? 1u : 0u;
+        mode.engage = (uint8_t)(cmd->s2 == DR16_SW_MID);
+        mode.usb_permit = (uint8_t)(cmd->s2 == DR16_SW_DOWN);
+        break;
+
+    case DR16_SW_DOWN:
+    default:
+        break;
+    }
+    return mode;
+}
+
+uint8_t strategy_rc_enable(const rc_command_t *cmd)
+{
+    return Control_Mode_Decode(cmd).rc_enable;
+}
+
+/* USB锁优先 */
+static ctrl_strategy_t strategy_from_mode(const rc_control_mode_t *mode)
+{
+    if (JointUsb_ModeLock())
+    {
+        return mode->usb_permit
+            ? CTRL_STRATEGY_JOINT_USB : CTRL_STRATEGY_DISABLE;
+    }
+    if (!robot_state.rc_enable)
+    {
+        return CTRL_STRATEGY_DISABLE;
+    }
+    return mode->strategy;
+}
 
 /* 统一使能许可 */
 uint8_t Robot_Control_Enable_Allowed(void)
 {
     uint8_t recovery;
+    rc_control_mode_t mode;
 
     if (JointUsb_ModeLock())
     {
-        return (uint8_t)(!gas_spring_only_enabled && JointUsb_EnableAllowed());
+        return JointUsb_EnableAllowed();
     }
+    mode = Control_Mode_Decode(&rc_command);
     recovery = (uint8_t)(standup_control.enabled && standup_control.recovery_enabled
-        && rc_command.online && rc_command.s1 == DR16_SW_MID
-        && rc_command.s2 == DR16_SW_MID);
+        && mode.strategy == CTRL_STRATEGY_LQR && mode.engage);
     return (uint8_t)(robot_state.rc_enable && rc_command.online
         && ctrl_fault == FAULT_NONE && (!robot_state.fallen || recovery));
 }
@@ -61,13 +134,14 @@ static void Control_Frame_Read(void)
     control_frame.left = leg_l;
     control_frame.right = leg_r;
     control_frame.rc = rc_command;
+    control_frame.mode = Control_Mode_Decode(&control_frame.rc);
     control_frame.wheel_vel[0] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
     control_frame.wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
     control_frame.drive = (uint8_t)(Robot_Control_Enable_Allowed()
         && robot_state.motor_enabled && torque_output_enabled);
     control_frame.normal = (uint8_t)(control_frame.drive && !robot_state.fallen);
     control_frame.recovery = (uint8_t)(control_frame.drive && standup_control.enabled
-        && control_frame.rc.s1 == DR16_SW_MID && control_frame.rc.s2 == DR16_SW_MID);
+        && control_frame.mode.strategy == CTRL_STRATEGY_LQR && control_frame.mode.engage);
     taskEXIT_CRITICAL();
 }
 
@@ -97,9 +171,12 @@ uint8_t output_task_rl_engaged(void)
 static void output_dispatch(const torque_output_t *torque)
 {
     torque_output_t applied;
+    compensation_debug_t debug;
     uint8_t i;
 
     applied = *torque;
+    debug = pending_compensation;
+    debug.bench = (uint8_t)(ctrl_strategy == CTRL_STRATEGY_COMPENSATION);
     for (i = 0u; i < DM_MOTOR_NUM; i++)
     {
         if (!isfinite(applied.dm[i]))
@@ -117,6 +194,10 @@ static void output_dispatch(const torque_output_t *torque)
     if (!applied.valid || !control_frame.drive || ctrl_fault != FAULT_NONE
         || !torque_output_enabled)
     {
+        memset(&debug, 0, sizeof(debug));
+        debug.bench = (uint8_t)(ctrl_strategy == CTRL_STRATEGY_COMPENSATION);
+        taskENTER_CRITICAL();
+        compensation_debug = debug;
         for (i = 0u; i < DM_MOTOR_NUM; i++)
         {
             rl_output_dm_cmd_nm[i] = 0.0f;
@@ -125,75 +206,26 @@ static void output_dispatch(const torque_output_t *torque)
         {
             rl_output_wheel_cmd_nm[i] = 0.0f;
         }
+        taskEXIT_CRITICAL();
         output_debug_dm_sent = (uint8_t)(Dm_Send_Zero() == HAL_OK);
         output_debug_dji_sent = (uint8_t)(Dji_All_Stop() == HAL_OK);
         return;
     }
+    taskENTER_CRITICAL();
+    compensation_debug = debug;
     for (i = 0u; i < DM_MOTOR_NUM; i++)
     {
         rl_output_dm_cmd_nm[i] = applied.dm[i];
     }
     rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_LFT] = applied.dji[DJI_MOTOR_WHEEL_LFT];
     rl_output_wheel_cmd_nm[DJI_MOTOR_WHEEL_RGT] = applied.dji[DJI_MOTOR_WHEEL_RGT];
+    taskEXIT_CRITICAL();
 
     output_debug_dm_sent = (uint8_t)(Dm_Send_Torque(applied.dm) == HAL_OK);
     output_debug_dji_sent = (uint8_t)(Dji_Send_Wheel_Torque(
         applied.dji[DJI_MOTOR_WHEEL_LFT], applied.dji[DJI_MOTOR_WHEEL_RGT]) == HAL_OK);
         // (void)Dm_Send_Zero();
         // (void)Dji_All_Stop();
-}
-
-/* ================= 模式与投入 ================= */
-/* 遥控使能判定 (全机唯一): online + 左中(需 LQR 表) / 左上(需 RL 表) */
-uint8_t strategy_rc_enable(const rc_command_t *cmd)
-{
-    if (cmd == NULL || !cmd->online)
-    {
-        return 0u;
-    }
-    if (gas_spring_only_enabled)
-    {
-        return (uint8_t)(GAS_SPRING_COMP_ENABLE
-            && machine->spring != NULL
-            && cmd->s1 == DR16_SW_UP);
-    }
-    if (cmd->s1 == DR16_SW_MID)
-    {
-        return LQR_Ready();
-    }
-    if (cmd->s1 == DR16_SW_UP)
-    {
-        return machine->rl.configured ? 1u : 0u;
-    }
-    return 0u;
-}
-
-/* 左拨杆选模式: 先看 rc_enable(唯一判定), 再按挡位给策略 */
-static ctrl_strategy_t strategy_from_remote(const rc_command_t *cmd)
-{
-    if (gas_spring_only_enabled)
-    {
-        return strategy_rc_enable(cmd) && robot_state.rc_enable && !JointUsb_ModeLock()
-            ? CTRL_STRATEGY_GAS_SPRING : CTRL_STRATEGY_DISABLE;
-    }
-    if (JointUsb_ModeLock())
-    {
-        return JointUsb_PhysicalPermit()
-            ? CTRL_STRATEGY_JOINT_USB : CTRL_STRATEGY_DISABLE;
-    }
-    if (!robot_state.rc_enable)
-    {
-        return CTRL_STRATEGY_DISABLE;
-    }
-    if (cmd->s1 == DR16_SW_MID)
-    {
-        return CTRL_STRATEGY_LQR;
-    }
-    if (cmd->s1 == DR16_SW_UP)
-    {
-        return CTRL_STRATEGY_RL;
-    }
-    return CTRL_STRATEGY_DISABLE;
 }
 
 /* 组装观测、速度补偿、位置积分 */
@@ -263,23 +295,41 @@ static void lqr_idle(void)
 }
 
 /* ================= 2 求解层: 只写 torque, 不下发 ================= */
-/* 仅弹簧补偿 */
-static void solve_gas_spring(torque_output_t *torque)
+/* 仅弹簧与重力 */
+static void solve_compensation(torque_output_t *torque)
 {
     const float base_dm[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float raw_dm[4];
     float limit;
+    float world_angle[2];
     uint8_t i;
 
-    if (!control_frame.normal
+    if (!control_frame.normal || !control_frame.imu.pitch_world_valid
+        || !isfinite(control_frame.imu.pitch_world)
         || !Gas_Spring_Apply(&control_frame.left, &control_frame.right, base_dm, raw_dm))
     {
         return;
     }
+    for (i = 0u; i < 4u; i++)
+    {
+        pending_compensation.spring_dm[i] = raw_dm[i];
+    }
+    world_angle[0] = remainderf(control_frame.left.output.virtual_leg_angle
+        - control_frame.imu.pitch_world, LEG_2PI);
+    world_angle[1] = remainderf(control_frame.right.output.virtual_leg_angle
+        - control_frame.imu.pitch_world, LEG_2PI);
+    if (!Gravity_Comp_Apply(&control_frame.left, &control_frame.right,
+        world_angle, raw_dm, raw_dm, &pending_compensation.gravity))
+    {
+        memset(&pending_compensation, 0, sizeof(pending_compensation));
+        return;
+    }
+    memcpy(pending_compensation.raw_dm, raw_dm, sizeof(raw_dm));
     limit = machine->dm_trq_clamp;
     for (i = 0u; i < DM_MOTOR_NUM; i++)
     {
         torque->dm[i] = clampf(raw_dm[i], -limit, limit);
+        pending_compensation.saturated |= (uint8_t)(torque->dm[i] != raw_dm[i]);
     }
     torque->valid = 1u;
 }
@@ -302,6 +352,10 @@ static void solve_lqr(torque_output_t *torque)
     }
     torque->valid = Leg_Balance_Compute(&leg_balance, &lqr_state, &control_frame.left, &control_frame.right,
                                         MACHINE_LQR_DT, torque);
+    if (torque->valid)
+    {
+        pending_compensation = leg_balance.compensation;
+    }
 }
 
 /* 独立自起选路 */
@@ -342,6 +396,10 @@ static void solve_lqr_standup(torque_output_t *torque)
     else
     {
         lqr_idle();
+        if (route == STANDUP_ROUTE_PREPARE && torque->valid)
+        {
+            pending_compensation = standup_control.compensation;
+        }
     }
 }
 
@@ -393,11 +451,12 @@ void output_task_body(void)
 
     /* 2 求解: torque 默认全零 valid=0, 只有走通的分支才置 valid */
     Torque_Output_Clear(&torque);
-    strategy = strategy_from_remote(&control_frame.rc);
+    memset(&pending_compensation, 0, sizeof(pending_compensation));
+    strategy = strategy_from_mode(&control_frame.mode);
     ctrl_strategy = strategy;
-    if (!standup_control.enabled || gas_spring_only_enabled || JointUsb_ModeLock()
-        || (rc_command.online && (rc_command.s1 != DR16_SW_MID
-            || rc_command.s2 != DR16_SW_MID)))
+    if (!standup_control.enabled || strategy == CTRL_STRATEGY_COMPENSATION || JointUsb_ModeLock()
+        || (control_frame.rc.online && !(control_frame.mode.strategy == CTRL_STRATEGY_LQR
+            && control_frame.mode.engage)))
     {
         Standup_Reset(&standup_control);
     }
@@ -414,18 +473,18 @@ void output_task_body(void)
 
     switch (strategy)
     {
-    case CTRL_STRATEGY_GAS_SPRING:
+    case CTRL_STRATEGY_COMPENSATION:
         lqr_idle();
-        solve_gas_spring(&torque);
+        solve_compensation(&torque);
         break;
 
     case CTRL_STRATEGY_LQR:
     {
-        if (standup_control.enabled && rc_command.s2 == DR16_SW_MID)
+        if (standup_control.enabled && control_frame.mode.engage)
         {
             solve_lqr_standup(&torque);
         }
-        else if (rc_command.s2 == DR16_SW_MID && lqr_engage_update())
+        else if (control_frame.mode.engage && lqr_engage_update())
         {
             solve_lqr(&torque);
         }
@@ -438,7 +497,7 @@ void output_task_body(void)
 
     case CTRL_STRATEGY_RL:
         lqr_running = 0u;
-        rl_engaged = (uint8_t)(control_frame.normal && control_frame.rc.s2 == DR16_SW_MID);
+        rl_engaged = (uint8_t)(control_frame.normal && control_frame.mode.engage);
         if (rl_engaged && action_state.rl_ready
             && control_frame.left.output.valid && control_frame.right.output.valid)
         {

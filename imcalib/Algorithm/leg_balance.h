@@ -6,14 +6,18 @@
 #include "leg_solver.h"
 #include "lqr_balance.h"
 #include "pid.h"
+#include "simple-function.h"
 #include "torque_output.h"
+#include "gravity_comp.h"
 
 typedef struct {
     pid_t leg_len[2];   /* 腿长 */
+    ramp_t length_ramp[2]; /* 腿长目标 */
     pid_t roll;         /* 横滚补偿 */
     float F[2];         /* 足端力 (调试) */
     float Tp[2];        /* 虚拟髋扭矩 (调试) */
     torque_output_t cmd;     /* 力矩命令 (调试) */
+    compensation_debug_t compensation;
     uint8_t len_prime_enable; /* 首拍预置 */
     uint8_t len_history_ready; /* 历史就绪 */
 } leg_balance_t;

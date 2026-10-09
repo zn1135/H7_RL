@@ -1292,6 +1292,11 @@
               <FilePath>../imcalib/Algorithm/gas_spring.c</FilePath>
             </File>
             <File>
+              <FileName>gravity_comp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/Algorithm/gravity_comp.c</FilePath>
+            </File>
+            <File>
               <FileName>slip.c</FileName>
               <FileType>1</FileType>
               <FilePath>../imcalib/Algorithm/slip.c</FilePath>

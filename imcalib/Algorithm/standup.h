@@ -4,7 +4,9 @@
 #include "leg_solver.h"
 #include "imu_state.h"
 #include "torque_output.h"
+#include "gravity_comp.h"
 #include "pid.h"
+#include "simple-function.h"
 
 enum {
     STANDUP_IDLE = 0,
@@ -114,9 +116,11 @@ typedef struct {
     float force[2];
     float tp[2];
     pid_t length_pid[2];
+    ramp_t length_ramp[2]; /* 腿长目标 */
     pid_t angle_pos_pid[2];
     pid_t angle_speed_pid[2];
     torque_output_t prepare;
+    compensation_debug_t compensation;
     float raw_dm[DM_MOTOR_NUM];   /* 限幅前 */
 } standup_ctx_t;
 

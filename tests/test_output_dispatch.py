@@ -29,6 +29,12 @@ HARNESS = r"""
 #include <string.h>
 #include <math.h>
 #include "torque_output.h"
+#include "gravity_comp.h"
+static compensation_debug_t pending_compensation, compensation_debug;
+static uint8_t ctrl_strategy;
+#define CTRL_STRATEGY_COMPENSATION 4
+#define taskENTER_CRITICAL() ((void)0)
+#define taskEXIT_CRITICAL() ((void)0)
 typedef enum { HAL_OK, HAL_ERROR } HAL_StatusTypeDef;
 static uint8_t torque_output_enabled, output_debug_dm_sent, output_debug_dji_sent;
 static float rl_output_dm_cmd_nm[4], rl_output_wheel_cmd_nm[2];
@@ -120,6 +126,7 @@ class OutputDispatchTest(unittest.TestCase):
             executable = folder / ("output_dispatch.exe" if os.name == "nt" else "output_dispatch")
             command = [compiler, "-std=c99", "-Wall", "-Wextra", "-Werror",
                        "-I" + str(folder), "-I" + str(ROOT / "imcalib/Algorithm"),
+                       "-I" + str(ROOT / "imcalib/user-lib"),
                        str(host), "-o", str(executable)]
             result = subprocess.run(command, capture_output=True, text=True, env=environment)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

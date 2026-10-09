@@ -64,7 +64,6 @@ static struct {
     rl_policy_t policy;
 } rl_control;
 static uint8_t fixture_engaged, network_success;
-static uint8_t gas_spring_only_enabled;
 static unsigned network_calls, trace_calls, network_init_calls;
 static uint32_t fixture_tick;
 static float captured_obs[RL_OBS_SIZE], captured_history[RL_OBS_HISTORY_SIZE];
@@ -215,7 +214,7 @@ int main(int argc, char **argv)
     unsigned i, frame;
     assert(argc == 2);
     setup();
-    if (strcmp(argv[1], "gas_only_no_inference") != 0)
+    if (strcmp(argv[1], "compensation_idle_no_inference") != 0)
     {
         assert(RL_CMD_VX_MAX == 1.0f && RL_CMD_YAW_MAX == 3.0f);
     }
@@ -354,10 +353,10 @@ int main(int argc, char **argv)
         assert(!rl_control.observation.valid && !rl_control.observation.history_ready);
         all_actions_zero();
     }
-    else if (strcmp(argv[1], "gas_only_no_inference") == 0)
+    else if (strcmp(argv[1], "compensation_idle_no_inference") == 0)
     {
         warmup();
-        gas_spring_only_enabled = 1;
+        fixture_engaged = 0;
         for (i = 0; i < RL_WARMUP_STEPS + 2; i++)
         {
             ctrl_task_body();
@@ -365,7 +364,6 @@ int main(int argc, char **argv)
         assert(network_calls == 0 && warmup_cnt == 0);
         assert(!action_state.rl_ready && !rl_control.observation.history_ready);
         all_actions_zero();
-        gas_spring_only_enabled = 0;
         warmup(); ctrl_task_body();
         assert(network_calls == 1 && action_state.rl_ready);
     }
@@ -404,8 +402,8 @@ class RlCommandInputTest(unittest.TestCase):
                             "inference_publication", "command_changes", "preview_no_inference", "invalid_source",
                             "network_failure", "joint_roles", "default_pose"))
 
-    def test_gas_only_suppresses_inference_and_restores_warmup(self):
-        self.run_scenarios(("gas_only_no_inference",))
+    def test_compensation_idle_suppresses_inference_and_restores_warmup(self):
+        self.run_scenarios(("compensation_idle_no_inference",))
 
     def run_scenarios(self, scenarios):
         compiler = os.environ.get("CC") or shutil.which("gcc")

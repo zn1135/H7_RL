@@ -196,7 +196,7 @@ static void RL_Infer_Body(void)
     float inference_us = 0.0f;
 
     RL_Command_From_Rc(command);
-    engaged = (uint8_t)(output_task_rl_engaged() && !gas_spring_only_enabled);
+    engaged = output_task_rl_engaged();
 
     /* 未投入: 清历史 (预览观测照算供 VOFA), 发零动作保持新鲜 (LQR 挡也走这里) */
     if (!engaged)

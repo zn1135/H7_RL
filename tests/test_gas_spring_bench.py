@@ -16,7 +16,6 @@ FIXTURE = r"""
 #define DR16_SW_UP 1
 #define DR16_SW_DOWN 2
 #define DR16_SW_MID 3
-static volatile uint8_t gas_spring_only_enabled = 1;
 static leg_state_t leg_l, leg_r;
 static rc_command_t rc_command;
 static struct { uint8_t rc_enable, motor_enabled, fallen; } robot_state;
@@ -43,7 +42,6 @@ static int HAL_TIM_Base_Start_IT(int *timer) { (void)timer; return HAL_OK; }
 static void Error_Handler(void) { assert(0); }
 static uint64_t Mono_Ns_Get(void) { return 1; }
 static uint8_t JointUsb_ModeLock(void) { return usb_lock; }
-static uint8_t JointUsb_PhysicalPermit(void) { return 1; }
 static uint8_t JointUsb_EnableAllowed(void) { return 1; }
 static int Dm_All_Enable(void) { return HAL_OK; }
 static int Dm_All_Disable(void) { return HAL_OK; }
@@ -55,8 +53,10 @@ static void JointUsb_ActuationTick(const torque_output_t *t, uint64_t ns, uint8_
 { (void)t; (void)ns; (void)ok; }
 #define LQR_Gain_Compatible() (machine->lqr_configured)
 #define LQR_Ready() (machine->lqr_configured)
-#define LQR_State_Update(a,b,c,d,e,f) ((void)(a),(void)(b),(void)(c),(void)(d),(void)(e),(void)(f),0)
+#define LQR_State_Update(a,b,c,d,e,f) ((void)(e),(void)(f),(a)->valid=(b)->online && (c)->output.valid && (d)->output.valid,(a)->valid)
 #define LQR_Enable_Latch(a,b,c) ((void)(a),(void)(b),(void)(c),1)
+#define LQR_Init(a) ((void)(a))
+#define LQR_Velocity_Apply(a,b,c) ((void)(a),(void)(b),(void)(c))
 #define Leg_Balance_Reset(a) ((void)(a))
 #define LQR_Target_Update(a,b,c) ((void)(a),(void)(b),(void)(c),0)
 #define LQR_Control_Update(a) ((void)(a),++lqr_calls)
@@ -72,14 +72,18 @@ static void tick(uint8_t expect_output)
     const leg_state_t *leg[2] = {&leg_l, &leg_r};
     output_task_body();
     assert(!rl_calls && !lqr_calls && !usb_calls);
-    assert(!output_task_rl_engaged() && !output_task_lqr_engaged());
+    assert(!output_task_lqr_engaged());
+    if (ctrl_strategy == CTRL_STRATEGY_COMPENSATION) { assert(!output_task_rl_engaged()); }
     assert(fixture_sent_wheel[0] == 0 && fixture_sent_wheel[1] == 0);
     for (i = 0; i < 4; i++)
     {
         float expected = 0;
         if (expect_output)
         {
-            assert(Leg_Force_Map_Forward(leg[i/2], -Leg_SpringF(leg[i/2]->output.virtual_leg_length), 0, delta));
+            gravity_leg_result_t gravity;
+            assert(Gravity_Comp_Compute(machine->gravity, leg[i/2]->output.virtual_leg_length,
+                leg[i/2]->output.virtual_leg_angle - imu_state.pitch_world, &gravity));
+            assert(Leg_Force_Map_Forward(leg[i/2], -Leg_SpringF(leg[i/2]->output.virtual_leg_length), gravity.torque, delta));
             expected = clampf(delta[i%2], -machine->dm_trq_clamp, machine->dm_trq_clamp);
         }
         assert(fabsf(fixture_sent_dm[i] - expected) < 0.0001f);
@@ -89,17 +93,14 @@ int main(void)
 {
     unsigned s1, s2;
     uint8_t available = GAS_SPRING_COMP_ENABLE && MACHINE_DEFAULT == MACHINE_ID_BIG_WHEELLEG;
+    rc_command.online = 1;
     robot_state.rc_enable = 1;
     Robot_Enable_Update(); assert(robot_state.motor_enabled);
     ctrl_fault = 1; Robot_Enable_Update(); assert(!robot_state.motor_enabled);
     ctrl_fault = 0; robot_state.fallen = 1;
     Robot_Enable_Update(); assert(!robot_state.motor_enabled);
     robot_state.fallen = 0; usb_lock = 1;
-    Robot_Enable_Update(); assert(!robot_state.motor_enabled);
-    gas_spring_only_enabled = 0;
     Robot_Enable_Update(); assert(robot_state.motor_enabled);
-    gas_spring_only_enabled = 1;
-    Robot_Enable_Update(); assert(!robot_state.motor_enabled);
     usb_lock = 0;
     fixture_machine = machine_table[MACHINE_DEFAULT];
     fixture_machine.dm_trq_clamp = 40;
@@ -110,24 +111,31 @@ int main(void)
     leg_l.input.hip_f = 2; leg_l.input.hip_b = 0.4f;
     leg_r = leg_l; leg_r.input.hip_f = 2.2f; leg_r.input.hip_b = 0.65f;
     assert(Leg_Solve(&leg_l) && Leg_Solve(&leg_r));
-    robot_state.motor_enabled = torque_output_enabled = rc_command.online = 1;
+    robot_state.motor_enabled = torque_output_enabled = rc_command.online = imu_state.pitch_world_valid = 1;
     for (s1 = 1; s1 <= 3; s1++)
     {
         rc_command.s1 = s1;
-        robot_state.rc_enable = strategy_rc_enable(&rc_command);
-        assert(robot_state.rc_enable == (available && s1 == DR16_SW_UP));
         for (s2 = 1; s2 <= 3; s2++)
         {
             rc_command.s2 = s2;
-            tick(available && s1 == DR16_SW_UP && s2 == DR16_SW_MID);
+            robot_state.rc_enable = strategy_rc_enable(&rc_command);
+            if (s1 == DR16_SW_MID && s2 == DR16_SW_UP)
+            {
+                assert(robot_state.rc_enable == available);
+            }
+            tick(available && s1 == DR16_SW_MID && s2 == DR16_SW_UP);
         }
     }
-    rc_command.s1 = DR16_SW_UP; rc_command.s2 = DR16_SW_MID;
+    rc_command.s1 = DR16_SW_MID; rc_command.s2 = DR16_SW_UP;
     robot_state.rc_enable = strategy_rc_enable(&rc_command);
     if (available)
     {
-        tick(1); assert(ctrl_strategy == CTRL_STRATEGY_GAS_SPRING);
+        tick(1); assert(ctrl_strategy == CTRL_STRATEGY_COMPENSATION);
+        assert(compensation_debug.gravity.valid && compensation_debug.bench);
+        fixture_machine.lqr_configured = 0; tick(1); fixture_machine.lqr_configured = 1;
         fixture_machine.dm_trq_clamp = 0.1f; tick(1);
+        assert(compensation_debug.saturated);
+        imu_state.pitch_world_valid = 0; tick(0); imu_state.pitch_world_valid = 1;
         leg_r.output.force_valid = 0; tick(0); leg_r.output.force_valid = 1;
         leg_l.output.virtual_leg_length = NAN; tick(0); assert(Leg_Solve(&leg_l));
         torque_output_enabled = 0; tick(0); torque_output_enabled = 1;
@@ -137,10 +145,13 @@ int main(void)
     usb_lock = 1; tick(0); assert(ctrl_strategy == CTRL_STRATEGY_DISABLE); usb_lock = 0;
     rc_command.online = 0; tick(0); assert(!strategy_rc_enable(&rc_command));
     assert(!strategy_rc_enable(NULL));
-    rc_command.online = 1; robot_state.rc_enable = 1; gas_spring_only_enabled = 0;
+    rc_command.online = 1; robot_state.rc_enable = 1;
+    rc_command.s1 = DR16_SW_UP; rc_command.s2 = DR16_SW_MID;
     assert(strategy_from_remote(&rc_command) == CTRL_STRATEGY_RL);
     rc_command.s1 = DR16_SW_MID; assert(strategy_from_remote(&rc_command) == CTRL_STRATEGY_LQR);
-    usb_lock = 1; assert(strategy_from_remote(&rc_command) == CTRL_STRATEGY_JOINT_USB);
+    usb_lock = 1; assert(strategy_from_remote(&rc_command) == CTRL_STRATEGY_DISABLE);
+    rc_command.s1 = DR16_SW_UP; rc_command.s2 = DR16_SW_DOWN;
+    assert(strategy_from_remote(&rc_command) == CTRL_STRATEGY_JOINT_USB);
     return 0;
 }
 """
@@ -154,7 +165,11 @@ static void normal_tick(unsigned expected)
     Robot_Enable_Update();
     rl_calls=lqr_calls=usb_calls=0;
     output_task_body();
-    assert(rl_calls==(expected==2) && lqr_calls==(expected==1));
+    if (rl_calls!=(expected==2) || lqr_calls!=(expected==1)) {
+        fprintf(stderr,"s1=%u s2=%u expected=%u rl=%u lqr=%u valid=%u fault=%u online=%u\n",
+            rc_command.s1,rc_command.s2,expected,rl_calls,lqr_calls,lqr_state.valid,ctrl_fault,imu_state.online);
+        assert(0);
+    }
     assert(!usb_calls);
     for(i=0;i<4;i++) { assert(fixture_sent_dm[i]==(float)expected); }
     for(i=0;i<2;i++) { assert(fabsf(fixture_sent_wheel[i]-0.1f*expected)<0.0001f); }
@@ -163,7 +178,6 @@ int main(void)
 {
     unsigned s1,s2,expected;
     fixture_machine=machine_table[MACHINE_DEFAULT];
-    assert(!gas_spring_only_enabled);
     torque_output_enabled=rc_command.online=imu_state.online=1;
     leg_l.output.valid=leg_r.output.valid=1;
     lqr_state.valid=action_state.rl_ready=1;
@@ -176,7 +190,11 @@ int main(void)
             if(s2==DR16_SW_MID && s1==DR16_SW_MID && machine->lqr_configured) { expected=1; }
             if(s2==DR16_SW_MID && s1==DR16_SW_UP && machine->rl.configured) { expected=2; }
             normal_tick(expected);
-            if(s1==DR16_SW_MID) { assert(ctrl_strategy==CTRL_STRATEGY_LQR); }
+            if(s1==DR16_SW_MID && s2!=DR16_SW_UP) { assert(ctrl_strategy==CTRL_STRATEGY_LQR); }
+            if(s1==DR16_SW_MID && s2==DR16_SW_UP) {
+                assert(ctrl_strategy==(GAS_SPRING_COMP_ENABLE && machine->gravity && machine->spring
+                    ? CTRL_STRATEGY_COMPENSATION : CTRL_STRATEGY_DISABLE));
+            }
             if(s1==DR16_SW_UP && machine->rl.configured) { assert(ctrl_strategy==CTRL_STRATEGY_RL); }
             if(s1==DR16_SW_DOWN) { assert(ctrl_strategy==CTRL_STRATEGY_DISABLE); }
         }
@@ -282,15 +300,54 @@ int main(void)
 }
 """
 
+DECODER_CHECK = r"""
+int main(void)
+{
+    rc_control_mode_t mode;
+    unsigned left,right,expected_enable,available;
+    fixture_machine=machine_table[MACHINE_DEFAULT];
+    Robot_Enable_Update();assert(!robot_state.motor_enabled);
+    rc_command.online=1;
+    available=GAS_SPRING_COMP_ENABLE && machine->spring && machine->gravity;
+    for(left=1;left<=3;left++) {
+        for(right=1;right<=3;right++) {
+            rc_command.s1=left;rc_command.s2=right;
+            mode=Control_Mode_Decode(&rc_command);
+            assert(mode.usb_permit==(left==DR16_SW_UP && right==DR16_SW_DOWN));
+            assert(mode.usb_reset==(left==DR16_SW_DOWN));
+            if(left==DR16_SW_MID && right==DR16_SW_UP) {
+                assert(mode.strategy==(available?CTRL_STRATEGY_COMPENSATION:CTRL_STRATEGY_DISABLE));
+                assert(mode.engage);expected_enable=available;
+            } else if(left==DR16_SW_MID) {
+                assert(mode.strategy==CTRL_STRATEGY_LQR);
+                assert(mode.engage==(right==DR16_SW_MID));expected_enable=machine->lqr_configured;
+            } else if(left==DR16_SW_UP) {
+                assert(mode.strategy==CTRL_STRATEGY_RL);
+                assert(mode.engage==(right==DR16_SW_MID));expected_enable=machine->rl.configured;
+            } else {
+                assert(mode.strategy==CTRL_STRATEGY_DISABLE && !mode.engage);expected_enable=0;
+            }
+            assert(mode.rc_enable==expected_enable && strategy_rc_enable(&rc_command)==expected_enable);
+            rc_command.online=0;mode=Control_Mode_Decode(&rc_command);
+            assert(mode.strategy==CTRL_STRATEGY_DISABLE && !mode.rc_enable && !mode.engage && !mode.usb_permit);
+            rc_command.online=1;
+        }
+    }
+    mode=Control_Mode_Decode(NULL);
+    assert(mode.strategy==CTRL_STRATEGY_DISABLE && !mode.rc_enable && !mode.engage && !mode.usb_permit && !mode.usb_reset);
+    fixture_machine.lqr_configured=0;rc_command.s1=DR16_SW_MID;rc_command.s2=DR16_SW_UP;
+    mode=Control_Mode_Decode(&rc_command);assert(mode.rc_enable==available);
+    return 0;
+}
+"""
+
+
 class GasSpringBenchTest(unittest.TestCase):
     def test_real_actuation_and_arbiter(self):
         self.build_and_run(FIXTURE, CHECK)
 
     def test_default_rl_lqr_switches_and_output_gates(self):
-        initial = re.search(r"gas_spring_only_enabled\s*=\s*(\d+)u?\s*;",
-                            read("imcalib/task/robot_control.c"))
-        self.assertIsNotNone(initial)
-        self.assertEqual(int(initial.group(1)), 0)
+        self.assertNotIn("gas_spring_only_enabled", read("imcalib/task/robot_control.c"))
         self.build_and_run(self.normal_fixture(), NORMAL_CHECK)
 
     def test_strategy_cadence_and_stop_on_skipped_rl_tick(self):
@@ -301,8 +358,11 @@ class GasSpringBenchTest(unittest.TestCase):
             "static uint8_t fixture_fail_output;\nstatic uint8_t fixture_output(torque_output_t *t, float value)\n{\n    unsigned i;\n    if(fixture_fail_output && value==2) { return 0; }")
         self.build_and_run(fixture, CADENCE_CHECK, instrument=True)
 
+    def test_single_decoder_truth_table(self):
+        self.build_and_run(FIXTURE, DECODER_CHECK)
+
     def normal_fixture(self):
-        fixture = FIXTURE.replace("gas_spring_only_enabled = 1", "gas_spring_only_enabled = 0")
+        fixture = FIXTURE
         fixture = fixture.replace(
             "#define LQR_Target_Update(a,b,c) ((void)(a),(void)(b),(void)(c),0)",
             "#define LQR_Target_Update(a,b,c) ((void)(a),(void)(b),(void)(c),1)")
@@ -333,7 +393,7 @@ static uint8_t fixture_output(torque_output_t *t, float value)
         environment = os.environ.copy()
         environment["PATH"] = str(Path(compiler).parent) + os.pathsep + environment.get("PATH", "")
         headers = HEADERS.replace("int unused; } rc_command_t", "uint8_t online, s1, s2; float vel, yaw, len; } rc_command_t")
-        headers = headers.replace("int unused; } imu_state_t", "uint8_t online, pitch_world_valid; float euler_rad[3], gyro_rad_s[3], pitch_world; } imu_state_t")
+        headers = headers.replace("typedef struct { int unused; } imu_state_t;", '#include "imu_state.h"\n#include "slip.h"')
         actuation = without_includes(read("imcalib/task/task_actuation.c"))
         actuation = actuation.replace("volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];", "")
         actuation = actuation.replace("volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];", "")
@@ -358,9 +418,15 @@ static uint8_t fixture_output(torque_output_t *t, float value)
                    without_includes(read("imcalib/Algorithm/leg_balance.h")),
                    without_includes(read("imcalib/Algorithm/standup.h")),
                    production_enum(read("imcalib/task/inc/robot_control.h"), "ctrl_strategy_t"),
+                   re.search(r"typedef struct \{\s*ctrl_strategy_t strategy;[^}]*\} rc_control_mode_t;",
+                       read("imcalib/task/inc/robot_control.h")).group(),
                    timing, stubs, fixture, without_includes(read("imcalib/Algorithm/gas_spring.c")),
+                   without_includes(read("imcalib/Algorithm/gravity_comp.c")),
                    without_includes(read("imcalib/Algorithm/standup.c")),
-                   actuation, production_function(read("imcalib/task/task_comm.c"), "Robot_Enable_Update"), check]
+                   actuation,
+                   "static inline ctrl_strategy_t strategy_from_remote(const rc_command_t *cmd) { "
+                   "rc_control_mode_t mode=Control_Mode_Decode(cmd); return strategy_from_mode(&mode); }",
+                   production_function(read("imcalib/task/task_comm.c"), "Robot_Enable_Update"), check]
         with tempfile.TemporaryDirectory(prefix="gas-bench-") as temporary:
             folder = Path(temporary)
             (folder / "arm_math.h").write_text(ARM_MATH_SHIM, encoding="utf-8")
@@ -374,7 +440,7 @@ static uint8_t fixture_output(torque_output_t *t, float value)
                             "-DLEG_TRIG_LIBM=1", f"-DMACHINE_DEFAULT={machine_id}",
                             f"-DGAS_SPRING_COMP_ENABLE={enabled}", "-I", str(folder),
                             "-I", str(ROOT / "imcalib/Algorithm"), "-I", str(ROOT / "imcalib/user-lib"),
-                            str(source), str(ROOT / "imcalib/Algorithm/leg_solver.c"), str(ROOT / "imcalib/user-lib/pid.c"), "-lm", "-o", str(exe)],
+                            str(source), str(ROOT / "imcalib/Algorithm/leg_solver.c"), str(ROOT / "imcalib/Algorithm/slip.c"), str(ROOT / "imcalib/user-lib/pid.c"), "-lm", "-o", str(exe)],
                             capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment)
                         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                         result = subprocess.run([str(exe)], capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment)

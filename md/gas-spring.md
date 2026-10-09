@@ -1,5 +1,7 @@
 # Leg3 气弹簧补偿
 
+> 2026-10-09：运行时弹簧台架标志删除，左中右上直接进入“弹簧＋完整重力摆矩”台架。LQR和自起也加入重力，RL和关节USB没有新增重力项。当前契约见 [gravity-comp.md](gravity-comp.md)；下文仅弹簧挡位记录为历史。
+
 > 2026-10-03 双机参数化：Leg3 常量原值迁入 `machine_spring_leg3`；`machine->spring` 大机器绑定、小机器 NULL，Apply 不再按机型宏区分数学路径。补偿符号和有限输入数学结果保持；默认策略现已恢复 RL/LQR。遗留 `gas_spring_force_n/gas_comp_sign` 不参与计算。
 
 

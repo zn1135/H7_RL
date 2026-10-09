@@ -2,6 +2,8 @@
 
 > 2026-10-03 双机 LQR：公共控制链 + `machine_cfg_t.lqr` + 独立大小机器 K 表，当前契约见 [lqr-dual-machine.md](lqr-dual-machine.md)。原物理量红线保持。
 
+> 2026-10-09：左中右上为弹簧＋完整重力台架，两轮零；自起和LQR也加完整重力，RL/USB不新增重力。旧运行时弹簧台架标志删除。接口、39通道观测与台架边界见 [gravity-comp.md](gravity-comp.md)。下文右非中位零输出的早期描述须排除此台架挡位，原标定红线保持。
+
 > 最后更新：2026-09-25
 > 适用：Claude / Cursor / Copilot / Codex / Gemini / Kimi Code 等任何 AI 助手。
 > 接手本仓库前**先读完这一篇**，再动手。

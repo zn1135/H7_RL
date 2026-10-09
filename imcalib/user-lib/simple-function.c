@@ -1,4 +1,6 @@
 #include "simple-function.h"
+#include <math.h>
+#include <stddef.h>
 
 /* ================= 一阶低通 ================= */
 
@@ -61,4 +63,20 @@ float Ramp_Reset(ramp_t *r, float value)
 {
     r->out = value;
     return r->out;
+}
+
+/* 实测值起步 */
+float Ramp_Target_Update(ramp_t *r, float measured, float target, float rate, float dt)
+{
+    if (r == NULL || !isfinite(measured) || !isfinite(target)
+        || !isfinite(rate) || rate <= 0.0f || !isfinite(dt) || dt <= 0.0f)
+    {
+        return NAN;
+    }
+    if (r->rate == 0.0f)
+    {
+        Ramp_Reset(r, measured);
+    }
+    r->rate = rate;
+    return Ramp_Update(r, target, dt);
 }

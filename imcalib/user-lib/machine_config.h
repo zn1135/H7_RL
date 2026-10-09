@@ -117,12 +117,26 @@ typedef struct {
 
 extern const machine_spring_cfg_t machine_spring_leg3;
 
+typedef struct {
+    float length;
+    float offset;
+    float radius;
+} machine_gravity_node_t;
+
+typedef struct {
+    float mass;
+    float gravity;
+    const machine_gravity_node_t *nodes;
+    uint8_t count;
+} machine_gravity_cfg_t;
+
 /* 一台机器的全部参数 */
 typedef struct {
     const char *name;
     uint8_t     lqr_configured;     /* 此机器有匹配的 LQR 增益表 */
     machine_lqr_cfg_t lqr;
     const machine_spring_cfg_t *spring;
+    const machine_gravity_cfg_t *gravity;
     /* 轮: 型号(0=M2006, 1=M3508) + 总传动比 + 满限幅力矩(Nm) */
     uint8_t     dji_type;
     float       dji_gear_ratio;

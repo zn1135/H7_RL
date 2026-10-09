@@ -27,9 +27,13 @@ static leg_state_t leg_l, leg_r;
 static imu_state_t imu_state;
 static lqr_state_t lqr_state;
 static struct { uint8_t motor_enabled, fallen; } robot_state;
-static struct { struct { uint8_t online[4]; } dm; struct { uint8_t online[2]; } dji;
+static struct { struct { uint8_t online[4]; float trq_nm[4]; } dm; struct { uint8_t online[2]; } dji;
                 uint32_t timestamp_ms; } motor_state;
 static uint32_t ctrl_fault;
+static compensation_debug_t compensation_debug;
+static float rl_output_dm_cmd_nm[4];
+#define taskENTER_CRITICAL() ((void)0)
+#define taskEXIT_CRITICAL() ((void)0)
 static machine_cfg_t fixture_machine;
 const machine_cfg_t *const machine=&fixture_machine;
 static uint8_t lqr_engaged, dma_ready=1;
@@ -81,12 +85,24 @@ int main(void)
     assert(out[0]==255 && out[1]==253 && out[2]==8);
     for(i=0;i<10;i++) { assert(out[3+i]==lqr_state.x[i]);assert(out[13+i]==lqr_state.target[i]); }
     assert(out[23]==-1.25f);
-    for(i=24;i<39;i++) { assert(out[i]==0); }
+    for(i=24;i<36;i++) { assert(out[i]==0); }
+    assert(out[36]==leg_l.output.virtual_leg_length && out[37]==leg_r.output.virtual_leg_length && out[38]==0);
     memcpy(prior,dma_buffer,160);count=send_count;
     lqr_state.a_fwd=2;Robot_Control_Send_Vofa();
     assert(send_count==count && memcmp(prior,dma_buffer,160)==0);
     lqr_engaged=1;ctrl_fault=4;frame(out);assert(out[1]==509 && out[2]==4 && out[23]==2);
     lqr_state.x[LQR_X_THB]=NAN;frame(out);assert(isnan(out[11]));
+    compensation_debug.gravity.valid=compensation_debug.bench=compensation_debug.saturated=1;
+    for(i=0;i<2;i++) {
+        compensation_debug.gravity.leg[i].torque=1.25f+i;
+        compensation_debug.gravity.leg[i].world_angle=-.5f+i;
+        compensation_debug.gravity.leg[i].clamped=1;
+    }
+    for(i=0;i<4;i++) { rl_output_dm_cmd_nm[i]=2.f+i;motor_state.dm.trq_nm[i]=-3.f-i; }
+    leg_l.output.virtual_leg_length=.23f;leg_r.output.virtual_leg_length=.27f;frame(out);
+    assert(out[24]==1.25f && out[25]==2.25f && out[26]==-.5f && out[27]==.5f);
+    for(i=0;i<4;i++) {assert(out[28+i]==2.f+i && out[32+i]==-3.f-i);}
+    assert(out[36]==.23f && out[37]==.27f && out[38]==31);
     return 0;
 }
 """
@@ -96,6 +112,7 @@ class VofaStandupTest(unittest.TestCase):
     def test_packing(self):
         compiler=os.environ.get('CC') or shutil.which('gcc')
         if compiler is None:self.skipTest('set CC to host gcc')
+        env=os.environ.copy();env['PATH']=str(Path(compiler).parent)+os.pathsep+env.get('PATH','')
         headers=PREFIX
         for path in ('imcalib/Algorithm/leg_solver.h','imcalib/Algorithm/imu_state.h','imcalib/user-lib/pid.h',
                      'imcalib/user-lib/rc_command.h',
@@ -113,9 +130,9 @@ class VofaStandupTest(unittest.TestCase):
                     exe=folder/f'vofa_standup{machine}.exe'
                     r=subprocess.run([compiler,'-std=c99','-Wall','-Wextra','-Werror',f'-DMACHINE_DEFAULT={machine}',
                                       '-I',str(ROOT/'imcalib/Algorithm'),'-I',str(ROOT/'imcalib/user-lib'),
-                                      str(source),'-lm','-o',str(exe)],capture_output=True,text=True)
+                                      str(source),'-lm','-o',str(exe)],capture_output=True,text=True,env=env)
                     self.assertEqual(r.returncode,0,r.stdout+r.stderr)
-                    r=subprocess.run([str(exe)],capture_output=True,text=True)
+                    r=subprocess.run([str(exe)],capture_output=True,text=True,env=env)
                     self.assertEqual(r.returncode,0,r.stdout+r.stderr)
 
 

@@ -49,6 +49,8 @@ void Leg_Balance_Reset(leg_balance_t *lb)
     memset(lb->F, 0, sizeof(lb->F));
     memset(lb->Tp, 0, sizeof(lb->Tp));
     memset(&lb->cmd, 0, sizeof(lb->cmd));
+    memset(&lb->compensation, 0, sizeof(lb->compensation));
+    memset(lb->length_ramp, 0, sizeof(lb->length_ramp));
     lb->len_history_ready = 0u;
 }
 
@@ -71,6 +73,7 @@ static void Leg_Balance_Prime_Length(pid_t *pid, float measured, float target)
 static uint8_t Leg_Balance_Output(leg_balance_t *lb, const leg_state_t *leg_l,
                                   const leg_state_t *leg_r, const float F[2],
                                   const float Tp[2], const float wheel[2],
+                                  const float world_angle[2],
                                   torque_output_t *torque)
 {
     float base_dm[4];
@@ -78,6 +81,7 @@ static uint8_t Leg_Balance_Output(leg_balance_t *lb, const leg_state_t *leg_l,
     uint8_t i;
 
     memset(&lb->cmd, 0, sizeof(lb->cmd));   /* 失败时与零力矩一致 */
+    memset(&lb->compensation, 0, sizeof(lb->compensation));
     for (i = 0u; i < 2u; i++)
     {
         if (!isfinite(F[i]) || !isfinite(Tp[i]))
@@ -95,6 +99,17 @@ static uint8_t Leg_Balance_Output(leg_balance_t *lb, const leg_state_t *leg_l,
     {
         return 0u;
     }
+    for (i = 0u; i < 4u; i++)
+    {
+        lb->compensation.spring_dm[i] = raw_dm[i] - base_dm[i];
+    }
+    if (!Gravity_Comp_Apply(leg_l, leg_r, world_angle, raw_dm, raw_dm,
+        &lb->compensation.gravity))
+    {
+        memset(&lb->compensation, 0, sizeof(lb->compensation));
+        return 0u;
+    }
+    memcpy(lb->compensation.raw_dm, raw_dm, sizeof(raw_dm));
     lb->F[0] = F[0];
     lb->F[1] = F[1];
     lb->Tp[0] = Tp[0];
@@ -103,6 +118,7 @@ static uint8_t Leg_Balance_Output(leg_balance_t *lb, const leg_state_t *leg_l,
     {
         torque->dm[i] = clampf(raw_dm[i], -lqr_debug.trq_max_hip,
                               lqr_debug.trq_max_hip);
+        lb->compensation.saturated |= (uint8_t)(torque->dm[i] != raw_dm[i]);
     }
 
     /* 轮扭矩 (输出极性在 dji.c 驱动边界统一处理) */
@@ -125,6 +141,7 @@ uint8_t Leg_Balance_Compute(leg_balance_t *lb, const lqr_state_t *st,
     float wheel[2];
     float length[2];
     float target[2];
+    float world_angle[2];
 
     if (lb == NULL || st == NULL || leg_l == NULL || leg_r == NULL
         || torque == NULL)
@@ -140,6 +157,13 @@ uint8_t Leg_Balance_Compute(leg_balance_t *lb, const lqr_state_t *st,
     length[1] = leg_r->output.virtual_leg_length;
     target[0] = st->leg_len_tgt[0];
     target[1] = st->leg_len_tgt[1];
+
+    target[0] = Ramp_Target_Update(&lb->length_ramp[0], length[0], target[0], machine->lqr.len_rate, dt);
+    target[1] = Ramp_Target_Update(&lb->length_ramp[1], length[1], target[1], machine->lqr.len_rate, dt);
+    if (!isfinite(target[0]) || !isfinite(target[1]))
+    {
+        return 0u;
+    }
 
     /* 首拍消除突变 */
     if (lb->len_prime_enable && !lb->len_history_ready)
@@ -178,5 +202,7 @@ uint8_t Leg_Balance_Compute(leg_balance_t *lb, const lqr_state_t *st,
     wheel[1] = lqr_debug.wheel_enable ? st->u[LQR_U_WR] : 0.0f;
 
     /* 3. 力域映射 + 限幅 */
-    return Leg_Balance_Output(lb, leg_l, leg_r, F, Tp, wheel, torque);
+    world_angle[0] = st->x[LQR_X_THL];
+    world_angle[1] = st->x[LQR_X_THR];
+    return Leg_Balance_Output(lb, leg_l, leg_r, F, Tp, wheel, world_angle, torque);
 }

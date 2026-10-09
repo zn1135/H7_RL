@@ -23,7 +23,7 @@ volatile uint8_t output_debug_dm_sent;
 volatile uint8_t output_debug_dji_sent;
 volatile control_time_debug_t control_time_debug;
 uint8_t torque_output_enabled;
-volatile uint8_t gas_spring_only_enabled = 0u;
+volatile compensation_debug_t compensation_debug;
 
 osSemaphoreDef(ctrl_tick_sem);
 osSemaphoreId ctrl_tick_sem_handle = NULL;

@@ -852,6 +852,7 @@ static uint8_t Standup_PID_Calculate(standup_ctx_t *st,
     float angle;
     float rate;
     float support_weight;
+    float length_target;
     uint8_t i;
 
     for (i = 0u; i < 2u; i++)
@@ -870,11 +871,17 @@ static uint8_t Standup_PID_Calculate(standup_ctx_t *st,
         {
             return 0u;
         }
+        length_target = Ramp_Target_Update(&st->length_ramp[i], leg[i]->output.virtual_leg_length,
+            st->length_cmd[i], machine->lqr.len_rate, dt);
+        if (!isfinite(length_target))
+        {
+            return 0u;
+        }
         if (!st->len_history_ready)
         {
-            Standup_Prime(&st->length_pid[i], leg[i]->output.virtual_leg_length, st->length_cmd[i]);
+            Standup_Prime(&st->length_pid[i], leg[i]->output.virtual_leg_length, length_target);
         }
-        st->force[i] = pid_calc(&st->length_pid[i], leg[i]->output.virtual_leg_length, st->length_cmd[i], dt);
+        st->force[i] = pid_calc(&st->length_pid[i], leg[i]->output.virtual_leg_length, length_target, dt);
         st->tp[i] = 0.0f;
         if (st->phase != STANDUP_RETRACT)
         {
@@ -908,16 +915,24 @@ static uint8_t Standup_PID_Calculate(standup_ctx_t *st,
 
 /* 公共映射与补偿 */
 static uint8_t Standup_Torque_Output(standup_ctx_t *st,
+                                    const imu_state_t *imu,
                                     const leg_state_t *const leg[2])
 {
     float base[DM_MOTOR_NUM];
     float raw[DM_MOTOR_NUM];
     float limit;
+    float world_angle[2];
     uint8_t i;
 
     Torque_Output_Clear(&st->prepare);
+    memset(&st->compensation, 0, sizeof(st->compensation));
+    if (machine->gravity != NULL && (!imu->pitch_world_valid || !isfinite(imu->pitch_world)))
+    {
+        return 0u;
+    }
     for (i = 0u; i < 2u; i++)
     {
+        world_angle[i] = Standup_Wrap(leg[i]->output.virtual_leg_angle - imu->pitch_world);
         if (!Leg_Force_Map_Forward(leg[i], st->force[i], st->tp[i], &base[2u * i]))
         {
             return 0u;
@@ -927,11 +942,23 @@ static uint8_t Standup_Torque_Output(standup_ctx_t *st,
     {
         return 0u;
     }
+    for (i = 0u; i < DM_MOTOR_NUM; i++)
+    {
+        st->compensation.spring_dm[i] = raw[i] - base[i];
+    }
+    if (!Gravity_Comp_Apply(leg[0], leg[1], world_angle, raw, raw,
+        &st->compensation.gravity))
+    {
+        memset(&st->compensation, 0, sizeof(st->compensation));
+        return 0u;
+    }
+    memcpy(st->compensation.raw_dm, raw, sizeof(raw));
     limit = machine->dm_trq_clamp;
     for (i = 0u; i < DM_MOTOR_NUM; i++)
     {
         st->raw_dm[i] = raw[i];
         st->prepare.dm[i] = clampf(raw[i], -limit, limit);
+        st->compensation.saturated |= (uint8_t)(st->prepare.dm[i] != raw[i]);
     }
     st->prepare.valid = 1u;
     return 1u;
@@ -991,7 +1018,7 @@ uint8_t Standup_Update(standup_ctx_t *st, const imu_state_t *imu,
                 standup_param.recovery_force_max);
         }
     }
-    if (!Standup_Torque_Output(st, leg))
+    if (!Standup_Torque_Output(st, imu, leg))
     {
         Standup_Fail(st, STANDUP_BAD_INPUT);
         Torque_Output_Clear(torque);

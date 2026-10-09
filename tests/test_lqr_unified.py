@@ -28,6 +28,7 @@ PREFIX = r"""
 #include <string.h>
 #include "arm_math.h"
 #include "machine_config.h"
+#include "gravity_comp.h"
 #include "leg_solver.h"
 #include "simple-function.h"
 #include "kalman.h"
@@ -169,9 +170,9 @@ static void length_history_startup(void)
 
     last_error = balance.leg_len[0].err[LAST];
     legs[0].input.hip_f += 0.001f; assert(Leg_Solve(&legs[0]));
-    error = state.leg_len_tgt[0] - legs[0].output.virtual_leg_length;
-    assert(fabsf(error-last_error)>0.000001f);
     assert(Leg_Balance_Compute(&balance,&state,&legs[0],&legs[1],MACHINE_CTRL_DT,&torque));
+    error = balance.leg_len[0].set[NOW] - legs[0].output.virtual_leg_length;
+    assert(fabsf(error-last_error)>0.000001f);
     near(balance.leg_len[0].dout,balance.leg_len[0].d*(error-last_error));
 
     Leg_Balance_Reset(&balance);
@@ -289,6 +290,7 @@ static void replay(void)
 {
     baseline_state_t old; lqr_state_t now; leg_balance_t bo,bn; torque_output_t to,tn;
     rc_command_t old_remote;
+    float raw_length[2];
     unsigned t,i;
     setup(); Baseline_LQR_Init(&old); LQR_Init(&now); lqr_debug.legacy_gain=1;
     Baseline_Leg_Balance_Init(&bo); Leg_Balance_Init(&bn);
@@ -317,8 +319,11 @@ static void replay(void)
         }
         for(i=0;i<4;i++) { near(old.u[i],now.u[i]); }
         Torque_Output_Clear(&to); Torque_Output_Clear(&tn);
-        assert(Baseline_Leg_Balance_Compute(&bo,&old,&legs[0],&legs[1],MACHINE_CTRL_DT,&to));
         assert(Leg_Balance_Compute(&bn,&now,&legs[0],&legs[1],MACHINE_CTRL_DT,&tn));
+        /* Compare unchanged force law on the same smoothed length inputs. */
+        for(i=0;i<2;i++) { raw_length[i]=old.leg_len_tgt[i]; old.leg_len_tgt[i]=bn.leg_len[i].set[NOW]; }
+        assert(Baseline_Leg_Balance_Compute(&bo,&old,&legs[0],&legs[1],MACHINE_CTRL_DT,&to));
+        for(i=0;i<2;i++) { old.leg_len_tgt[i]=raw_length[i]; }
         for(i=0;i<4;i++) { near(to.dm[i],tn.dm[i]); }
         for(i=0;i<2;i++) { near(to.dji[i],tn.dji[i]); }
     }
@@ -388,7 +393,7 @@ class UnifiedLqrTest(unittest.TestCase):
         for path in ("imcalib/user-lib/rc_command.h", "imcalib/Algorithm/torque_output.h",
                      "imcalib/Algorithm/lqr_balance.h", "imcalib/Algorithm/leg_balance.h",
                      "imcalib/Algorithm/gas_spring.h", "imcalib/Algorithm/lqr_balance.c",
-                     "imcalib/Algorithm/leg_balance.c", "imcalib/Algorithm/gas_spring.c"):
+                     "imcalib/Algorithm/leg_balance.c", "imcalib/Algorithm/gas_spring.c", "imcalib/Algorithm/gravity_comp.c"):
             source += "\n" + without_includes(read(path))
         source += "\n" + baseline() + "\n" + CHECK
         harness = folder / "controller.c"

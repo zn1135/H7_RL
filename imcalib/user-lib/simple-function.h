@@ -22,5 +22,6 @@ typedef struct {
 void  Ramp_Init(ramp_t *r, float rate);
 float Ramp_Update(ramp_t *r, float target, float dt);
 float Ramp_Reset(ramp_t *r, float value);
+float Ramp_Target_Update(ramp_t *r, float measured, float target, float rate, float dt);
 
 #endif
