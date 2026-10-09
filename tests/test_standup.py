@@ -20,7 +20,7 @@ static lqr_state_t lqr_state;
 static leg_balance_t leg_balance;
 static rc_command_t rc_command;
 static struct { uint8_t rc_enable, motor_enabled, fallen; } robot_state;
-static struct { struct { float vel_rad_s[2]; } dji; } motor_state;
+static struct { struct { float trq_nm[4]; uint64_t parsed_rx_ns[4]; uint8_t online[4]; } dm; struct { float vel_rad_s[2]; } dji; } motor_state;
 static struct { uint8_t rl_ready; float a[6]; } action_state;
 static struct { struct { unsigned selected_model; } policy;
     rl_torque_param_t torque_param[1]; rl_torque_state_t torque_state; } rl_control;
@@ -56,6 +56,8 @@ static void JointUsb_Compute(torque_output_t *t) { (void)t; }
 static void JointUsb_ActuationTick(const torque_output_t *t, uint64_t n, uint8_t ok)
 { (void)t; (void)n; (void)ok; }
 static int Dm_All_Enable(void) { return HAL_OK; }
+static uint8_t fixture_dm_enable_mask = 15u;
+static uint8_t Dm_Is_Enabled(uint8_t i) { return i < 4 && (fixture_dm_enable_mask & (1u << i)); }
 static int Dm_All_Disable(void) { disable_count++; return HAL_OK; }
 static void Dm_Enable_Watchdog(void) {}
 static void Dm_Disable_Watchdog(void) {}
@@ -147,8 +149,8 @@ int main(void)
     }
     leg_r.output.virtual_leg_angle=machine->lqr.leg_trim[1]+standup_param.angle_tol+.01f;step();
     assert(standup_control.stable==0 && standup_control.ready_block==32);
-    leg_r.output.virtual_leg_angle=-.111971f;imu_state.euler_rad[0]=standup_param.roll_ready+.01f;step();
-    assert(standup_control.stable==0 && standup_control.ready_block==256 && !lqr_running);
+    leg_r.output.virtual_leg_angle=-.111971f;imu_state.euler_rad[0]=1.3f;step();
+    assert(standup_control.stable>0 && standup_control.ready_block==0 && !lqr_running);
     imu_state.euler_rad[0]=.014841f;
     for(i=0;i<300 && standup_control.phase==STANDUP_SWING;i++)
     {
@@ -190,8 +192,8 @@ int main(void)
     standup_control.length_cmd[1]+=.04f;
     leg_l.output.virtual_leg_angle+=standup_param.angle_tol+.01f;
     standup_control.angle_cmd[1]+=standup_param.angle_tol+.01f;
-    imu_state.euler_rad[0]=standup_param.roll_ready+.01f;
-    assert(!Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==400u);
+    imu_state.euler_rad[0]=1.3f;
+    assert(!Standup_Ready(&standup_control,&imu_state,legs) && standup_control.ready_block==144u);
     Standup_Reset(&standup_control);assert(standup_control.ready_block==0);
     setup(standup_param.rear_angle);step();
     for(i=0;i<2000 && standup_control.phase!=STANDUP_SWING;i++) { follow();step(); }
@@ -313,7 +315,8 @@ int main(void)
     setup(.3f);rc_command.s1=DR16_SW_UP;pose(LEG_PI,0);step();zero();assert(!robot_state.motor_enabled);
     setup(.3f);imu_state.euler_rad[0]=LEG_PI*.5f;
     imu_state.quat[0]=cosf(LEG_PI*.25f);imu_state.quat[1]=sinf(LEG_PI*.25f);imu_state.quat[2]=0;
-    step();assert(standup_control.pose==STANDUP_POSE_SIDE && standup_control.phase!=STANDUP_FAILED);
+    step();assert(standup_control.pose==(standup_control.upright<0?STANDUP_POSE_INVERTED:STANDUP_POSE_NORMAL)
+        && standup_control.phase!=STANDUP_FAILED);
     setup(.3f);pose(LEG_PI,0);step();
     for(i=0;i<12000 && standup_control.phase!=STANDUP_FAILED;i++) { step(); }
     zero();assert(standup_control.phase==STANDUP_FAILED && standup_control.retry==standup_param.recovery_retry_max);
@@ -326,16 +329,15 @@ int main(void)
     'slip_module': r"""
 int main(void)
 {
-    slip_state_t st;unsigned i;float value;
-    setup(0);Slip_Reset(&st);
-    value=Slip_Update(&st,3,0,.001f,.1f,.007f,.01f,.5f);
-    assert(st.active && st.noise_scale>1 && value>0 && value<2);
-    st.blank=0;
-    for(i=0;i<50;i++) { Slip_Update(&st,st.velocity+1,0,.001f,.1f,.007f,.01f,.5f); }
-    assert(st.suspected);
-    for(i=0;i<160;i++) { Slip_Update(&st,st.velocity,0,.001f,.1f,.007f,.01f,.5f); }
-    assert(!st.suspected);
-    Slip_Reset(&st);assert(!st.active && st.velocity==0);
+    slip_state_t st;unsigned i;
+    setup(0);Slip_Init(&st,0,0);
+    assert(Slip_Update(&st,3,0,.001f));
+    assert(st.valid && st.noise_scale>1 && st.velocity>0 && st.velocity<3);
+    for(i=0;i<50;i++) { assert(Slip_Update(&st,st.velocity+3,0,.001f)); }
+    assert(st.noise_scale>1);
+    for(i=0;i<160;i++) { assert(Slip_Update(&st,st.velocity,0,.001f)); }
+    assert(st.noise_scale==1);
+    Slip_Reset(&st);assert(!st.initialized && st.velocity==0);
     step();assert(lqr_state.valid);
     standup_control.enabled=0;step();assert(lqr_state.valid);
     assert(lqr_state.x[LQR_X_DS]==lqr_state.ds_kf);
@@ -403,8 +405,8 @@ int main(void)
     leg_l.output.virtual_leg_length=leg_r.output.virtual_leg_length=standup_param.retract_len;
     standup_control.length_cmd[0]=standup_control.length_cmd[1]=standup_param.retract_len;
     standup_control.angle_cmd[0]=machine->lqr.leg_trim[0];standup_control.angle_cmd[1]=machine->lqr.leg_trim[1];
-    imu_state.euler_rad[0]=standup_param.roll_ready+.01f;assert(!Standup_Ready(&standup_control,&imu_state,legs));
-    imu_state.euler_rad[0]=standup_param.roll_ready-.01f;assert(Standup_Ready(&standup_control,&imu_state,legs));
+    imu_state.euler_rad[0]=1.3f;assert(Standup_Ready(&standup_control,&imu_state,legs));
+    imu_state.euler_rad[0]=-1.3f;assert(Standup_Ready(&standup_control,&imu_state,legs));
     setup(0);standup_control.enabled=0;imu_state.euler_rad[0]=.2f;step();
     assert(lqr_running && leg_balance.roll.pos_out<0);
     assert(leg_balance.F[0]<leg_balance.F[1]);
@@ -860,7 +862,7 @@ class StandupTest(unittest.TestCase):
         compiler=os.environ.get('CC') or shutil.which('gcc')
         if compiler is None:self.skipTest('set CC to host gcc')
         env=os.environ.copy();env['PATH']=str(Path(compiler).parent)+os.pathsep+env.get('PATH','')
-        headers=[PREFIX.replace('#define DM_MOTOR_NUM 4\n',''),
+        headers=['#include "air_detection.h"\n#include "Attitude_Algorithm.h"', PREFIX.replace('#define DM_MOTOR_NUM 4\n',''),
                  '#define RL_ACTION_SIZE 6\ntypedef int rl_model_t;',
                  production_enum(read('imcalib/user-lib/dm.h'),'dm_motor_idx_t')]
         for path in ('imcalib/user-lib/rc_command.h','imcalib/Algorithm/torque_output.h','imcalib/Algorithm/rl_torque.h',
@@ -874,7 +876,7 @@ class StandupTest(unittest.TestCase):
         split=FIXTURE.index('static void zero(')
         content='\n'.join(headers)+'\n'+config+'\n'+FIXTURE[:split]
         for path in ('imcalib/Algorithm/lqr_balance.c','imcalib/Algorithm/leg_balance.c','imcalib/Algorithm/gas_spring.c',
-                     'imcalib/Algorithm/gravity_comp.c',
+                     'imcalib/Algorithm/gravity_comp.c', 'imcalib/Algorithm/air_detection.c', 'imcalib/Algorithm/Attitude_Algorithm.c',
                      'imcalib/Algorithm/standup.c','imcalib/task/task_actuation.c'):
             content+='\n'+without_includes(read(path))
         content+='\n'+production_function(read('imcalib/task/task_comm.c'),'Robot_Fallen_Update')

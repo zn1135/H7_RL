@@ -29,4 +29,6 @@ extern slip_param_t slip_param;
 void Slip_Init(slip_state_t *st, float v0, float a0);
 void Slip_Reset(slip_state_t *st);
 uint8_t Slip_Update(slip_state_t *st, float wheel_v, float imu_acc, float dt);
+uint8_t Slip_Update_Contact(slip_state_t *st, float wheel_v, float imu_acc,
+                            float dt, uint8_t wheel_contact);
 #endif

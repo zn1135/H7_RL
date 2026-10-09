@@ -2,7 +2,7 @@
 
 # 大、小机器公共 LQR
 
-> 2026-10-09：正常腿长PD与自起腿长PD统一调用现有斜坡库的Ramp_Target_Update，使用machine->lqr.len_rate限制每拍目标变化。两条控制路径各保存左右斜坡输出，首次/控制器复位后从实测腿长起步，随后只从上一拍输出推进；原leg_len_tgt和length_cmd保持上层最终目标。斜坡在PD历史预置之前计算，历史预置与PD使用相同的斜坡目标；正常Leg_Balance_Reset清斜坡，自起预置历史不清斜坡。参数、支撑前馈、摆角、自重/弹簧补偿和最终关节限幅保持。Watch观察leg_balance.leg_len[i].set[NOW]或length_ramp[i].out；未上机验证。
+> 2026-10-09：正常腿长PD与自起腿长PD统一调用现有斜坡库的Ramp_Target_Update，正常速率取machine->lqr.len_rate，自起/翻身速率独立取standup_param.length_rate，限制每拍目标变化。两条控制路径各保存左右斜坡输出，首次/控制器复位后从实测腿长起步，随后只从上一拍输出推进；原leg_len_tgt和length_cmd保持上层最终目标。斜坡在PD历史预置之前计算，历史预置与PD使用相同的斜坡目标；正常Leg_Balance_Reset清斜坡，自起预置历史不清斜坡。支撑前馈、摆角、自重/弹簧补偿和最终关节限幅保持。Watch观察leg_balance.leg_len[i].set[NOW]或length_ramp[i].out；未上机验证。
 
 > 2026-10-09：大机LQR和自起接入完整重力摆矩，左中右上为仅弹簧＋重力台架，旧运行时标志删除。见 [gravity-comp.md](gravity-comp.md)。本轮不改K，含补偿的闭环效果待台架。
 

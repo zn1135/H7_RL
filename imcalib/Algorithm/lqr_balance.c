@@ -177,6 +177,11 @@ void LQR_Velocity_Apply(lqr_state_t *st, float velocity, float dt)
     }
     st->ds_kf = velocity;
     st->x[LQR_X_DS] = velocity;
+    if (st->air_control)
+    {
+        st->x[LQR_X_S] = st->pos;
+        return;
+    }
     legs_ready = (uint8_t)(fabsf(LQR_Wrap_Pi(st->x[LQR_X_THL]
         - machine->lqr.leg_trim[0])) <= LQR_POS_LEG_TOL
         && fabsf(LQR_Wrap_Pi(st->x[LQR_X_THR]
@@ -325,6 +330,7 @@ void LQR_Control_Update(lqr_state_t *st)
     float len_r;
     float sum;
     float term;
+    float hip_limit;
     uint8_t i;
     uint8_t j;
 
@@ -332,6 +338,10 @@ void LQR_Control_Update(lqr_state_t *st)
     memset(st->u, 0, sizeof(st->u));
     if (!st->valid || !LQR_Gain_Compatible()
         || !isfinite(st->len[0]) || !isfinite(st->len[1]))
+    {
+        return;
+    }
+    if (st->air_control && (!isfinite(st->air_hip_max) || st->air_hip_max <= 0.0f))
     {
         return;
     }
@@ -360,10 +370,15 @@ void LQR_Control_Update(lqr_state_t *st)
 
     for (i = 0u; i < LQR_U_NUM; i++)
     {
-        sum = LQR_Gain_Info()->u_eq[i];
+        sum = st->air_control ? 0.0f : LQR_Gain_Info()->u_eq[i];
         for (j = 0u; j < LQR_X_NUM; j++)
         {
-            if (j == LQR_X_PHI)
+            if (st->air_control
+                && (i == LQR_U_WL || i == LQR_U_WR || j < LQR_X_THL || j > LQR_X_DTHR))
+            {
+                term = 0.0f;
+            }
+            else if (j == LQR_X_PHI)
             {
                 term = lqr_debug.yaw_hold
                      ? st->K[i][j] * LQR_Wrap_Pi(st->target[j] + LQR_Gain_Info()->x_eq[j] - st->x[j])
@@ -373,6 +388,11 @@ void LQR_Control_Update(lqr_state_t *st)
                      || (j == LQR_X_S && !lqr_debug.pos_hold))
             {
                 term = 0.0f;                        /* 关: 该列不参与 */
+            }
+            else if (st->air_control && (j == LQR_X_THL || j == LQR_X_THR))
+            {
+                term = st->K[i][j] * remainderf(st->target[j]
+                    + LQR_Gain_Info()->x_eq[j] - st->x[j], LEG_2PI);
             }
             else
             {
@@ -396,8 +416,9 @@ void LQR_Control_Update(lqr_state_t *st)
         }
         else
         {
-            st->u[i] = clampf(sum, -lqr_debug.trq_max_hip,
-                              lqr_debug.trq_max_hip);
+            hip_limit = st->air_control ? fminf(st->air_hip_max, lqr_debug.trq_max_hip)
+                : lqr_debug.trq_max_hip;
+            st->u[i] = clampf(sum, -hip_limit, hip_limit);
         }
     }
     st->gain_valid = 1u;

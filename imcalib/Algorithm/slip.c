@@ -107,6 +107,12 @@ static uint8_t Slip_Correct(slip_state_t *st, uint8_t axis,
 /* 预测、加速度修正、轮速降权修正 */
 uint8_t Slip_Update(slip_state_t *st, float wheel_v, float imu_acc, float dt)
 {
+    return Slip_Update_Contact(st, wheel_v, imu_acc, dt, 1u);
+}
+
+uint8_t Slip_Update_Contact(slip_state_t *st, float wheel_v, float imu_acc,
+                            float dt, uint8_t wheel_contact)
+{
     float p00;
     float p01;
     float p10;
@@ -120,7 +126,7 @@ uint8_t Slip_Update(slip_state_t *st, float wheel_v, float imu_acc, float dt)
         return 0u;
     }
     st->valid = 0u;
-    if (!isfinite(wheel_v) || !isfinite(imu_acc) || !isfinite(dt) || dt <= 0.0f
+    if ((wheel_contact && !isfinite(wheel_v)) || !isfinite(imu_acc) || !isfinite(dt) || dt <= 0.0f
         || !(slip_param.q_velocity >= 0.0f) || !(slip_param.q_acceleration >= 0.0f)
         || !(slip_param.r_velocity > 0.0f) || !(slip_param.r_acceleration > 0.0f)
         || !(slip_param.gate > 0.0f) || !(slip_param.gate_min > 0.0f))
@@ -130,7 +136,7 @@ uint8_t Slip_Update(slip_state_t *st, float wheel_v, float imu_acc, float dt)
     }
     if (!st->initialized)
     {
-        Slip_Init(st, wheel_v, imu_acc);
+        Slip_Init(st, wheel_contact ? wheel_v : 0.0f, imu_acc);
         return st->valid;
     }
     scale = dt / SLIP_NOISE_DT;
@@ -148,6 +154,13 @@ uint8_t Slip_Update(slip_state_t *st, float wheel_v, float imu_acc, float dt)
     {
         Slip_Reset(st);
         return 0u;
+    }
+    if (!wheel_contact)
+    {
+        st->innovation = 0.0f;
+        st->noise_scale = 1.0f;
+        st->valid = 1u;
+        return 1u;
     }
     st->innovation = wheel_v - st->velocity;
     st->limit = fmaxf(slip_param.gate_min,

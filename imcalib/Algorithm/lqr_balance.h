@@ -70,6 +70,8 @@ typedef struct {
     float yaw_tgt;                  /* 偏航角目标 */
     float vel_tgt;                  /* 速度目标 */
     float roll;                     /* 机体横滚角 */
+    uint8_t air_control;
+    float air_hip_max;
     lowpass1d_t lpf_omg_pitch;      /* 俯仰角速度低通 */
     lowpass1d_t lpf_omg_yaw;        /* 偏航角速度低通 */
 } lqr_state_t;

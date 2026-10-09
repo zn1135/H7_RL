@@ -59,14 +59,14 @@ ch7为诊断掩码：bit0 enabled、1 need、2 recovery_enabled、3 recovered、
 | 4／8 | 保留位，当前不再使用；旧固件表示长度指令未到位 |
 | 16／32 | 左／右实际摆角未到位；后摆按展开路径，摆正按原环绕误差 |
 | 64／128 | 左／右摆角目标未进入到位窗口 |
-| 256 | roll未进入roll_ready窗口 |
+| 256 | 保留位，当前不使用；旧固件表示roll到位门槛阻塞 |
 | 512 | 后摆路径尚未初始化 |
 
 阻塞位可相加，例如3表示两腿实际长度均未到位，48表示两腿实际摆角均未到位。该掩码由Standup_Ready实际判据生成，不在通信层另做判断；只在到位检查时刷新，DONE／FAILED保留最后值。0不代表持稳已够，需同时比较ch6和ch38；硬故障或姿态停止应看ch2／4，不能仅看旧阻塞位。
 
 推荐先画ch3／4／5／6／8判断阶段与卡点，再画ch11／13、ch17～24和ch27～36关联姿态、跟踪及出力。到位后应同拍进入phase3且ch1的256位出现，直接使用完整LQR输出；本次已删除blend／blend_time，没有渐入或对照开关。在线位或请求入队成功不证明电机收到请求，也不代表实机出力与命令相同。
 
-Watch参数分组：伸腿看extend_len／extend_tol／extend_timeout；后摆看rear_angle／rear_tol／rear_rate／rear_timeout；收腿看retract_len／retract_ready_len／timeout[0]；摆正交接看angle_tol／roll_ready／stable_time／timeout[1]；支撑看support_time。length_tol已删除，SWING不再检查实际或指令腿长误差；腿长PD仍持续控制retract_len。姿态恢复看pitch_max／roll_max／recovery_enabled及recovery各参数。腿长PD来自machine->lqr.leg_len，摆角串级参数来自standup_param；记录当前烧录参数，不沿用旧快照。
+Watch参数分组：伸腿看extend_len／extend_tol／extend_timeout；后摆看rear_angle／rear_tol／rear_rate／rear_timeout；收腿看retract_len／retract_ready_len／timeout[0]；摆正交接看angle_tol／stable_time／timeout[1]；支撑看support_time，自起腿长斜率看length_rate。length_tol及所有自起roll门槛已删除，SWING不再检查实际或指令腿长误差；腿长PD仍持续控制retract_len。姿态恢复看upright／pitch_max／recovery_enabled及recovery各参数。腿长PD来自machine->lqr.leg_len，摆角串级参数来自standup_param；记录当前烧录参数，不沿用旧快照。
 
 采集包含投入前、一次失败和退出前的完整记录。退出拨杆会清本次状态，FAILED期间控制量及计时通常保留，但硬输出为零；自动重试会清状态并重新准备，结合ch9和ch37识别。新旧CSV即使均39通道也不能混用下标。
 

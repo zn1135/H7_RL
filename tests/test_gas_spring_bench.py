@@ -24,7 +24,7 @@ static uint32_t ctrl_fault;
 #define Robot_Control_Vofa_Diag_Update(request) ((void)(request))
 #define taskENTER_CRITICAL() ((void)0)
 #define taskEXIT_CRITICAL() ((void)0)
-static struct { struct { float vel_rad_s[2]; } dji; } motor_state;
+static struct { struct { float trq_nm[4]; uint64_t parsed_rx_ns[4]; uint8_t online[4]; } dm; struct { float vel_rad_s[2]; } dji; } motor_state;
 static imu_state_t imu_state;
 static struct { uint8_t rl_ready; float a[6]; } action_state;
 static struct {
@@ -44,6 +44,7 @@ static uint64_t Mono_Ns_Get(void) { return 1; }
 static uint8_t JointUsb_ModeLock(void) { return usb_lock; }
 static uint8_t JointUsb_EnableAllowed(void) { return 1; }
 static int Dm_All_Enable(void) { return HAL_OK; }
+static uint8_t Dm_Is_Enabled(uint8_t i) { return i < 4; }
 static int Dm_All_Disable(void) { return HAL_OK; }
 static void Dm_Enable_Watchdog(void) {}
 static void Dm_Disable_Watchdog(void) {}
@@ -393,7 +394,7 @@ static uint8_t fixture_output(torque_output_t *t, float value)
         environment = os.environ.copy()
         environment["PATH"] = str(Path(compiler).parent) + os.pathsep + environment.get("PATH", "")
         headers = HEADERS.replace("int unused; } rc_command_t", "uint8_t online, s1, s2; float vel, yaw, len; } rc_command_t")
-        headers = headers.replace("typedef struct { int unused; } imu_state_t;", '#include "imu_state.h"\n#include "slip.h"')
+        headers = headers.replace("typedef struct { int unused; } imu_state_t;", '#include "imu_state.h"\n#include "slip.h"\n#include "air_detection.h"')
         actuation = without_includes(read("imcalib/task/task_actuation.c"))
         actuation = actuation.replace("volatile float rl_output_dm_cmd_nm[DM_MOTOR_NUM];", "")
         actuation = actuation.replace("volatile float rl_output_wheel_cmd_nm[DJI_MOTOR_NUM];", "")
@@ -440,7 +441,7 @@ static uint8_t fixture_output(torque_output_t *t, float value)
                             "-DLEG_TRIG_LIBM=1", f"-DMACHINE_DEFAULT={machine_id}",
                             f"-DGAS_SPRING_COMP_ENABLE={enabled}", "-I", str(folder),
                             "-I", str(ROOT / "imcalib/Algorithm"), "-I", str(ROOT / "imcalib/user-lib"),
-                            str(source), str(ROOT / "imcalib/Algorithm/leg_solver.c"), str(ROOT / "imcalib/Algorithm/slip.c"), str(ROOT / "imcalib/user-lib/pid.c"), "-lm", "-o", str(exe)],
+                            str(source), str(ROOT / "imcalib/Algorithm/leg_solver.c"), str(ROOT / "imcalib/Algorithm/slip.c"), str(ROOT / "imcalib/Algorithm/air_detection.c"), str(ROOT / "imcalib/Algorithm/Attitude_Algorithm.c"), str(ROOT / "imcalib/user-lib/pid.c"), str(ROOT / "imcalib/user-lib/simple-function.c"), "-lm", "-o", str(exe)],
                             capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment)
                         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                         result = subprocess.run([str(exe)], capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment)

@@ -1302,6 +1302,11 @@
               <FilePath>../imcalib/Algorithm/slip.c</FilePath>
             </File>
             <File>
+              <FileName>air_detection.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../imcalib/Algorithm/air_detection.c</FilePath>
+            </File>
+            <File>
               <FileName>standup.c</FileName>
               <FileType>1</FileType>
               <FilePath>../imcalib/Algorithm/standup.c</FilePath>

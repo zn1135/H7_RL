@@ -22,6 +22,12 @@ static float Spring_Force(const machine_spring_cfg_t *model, float L0)
         fmaxf(model->denominator_scale * arm_sin_f32(theta) * sqrt_tmp1, 1.0E-6F));
 }
 
+/* 实体弹簧力 */
+float Gas_Spring_Force(float L0)
+{
+    return machine->spring != NULL ? Spring_Force(machine->spring, L0) : 0.0f;
+}
+
 float Leg_SpringF(float L0)
 {
     return Spring_Force(&machine_spring_leg3, L0);

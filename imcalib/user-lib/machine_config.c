@@ -50,7 +50,7 @@ const machine_cfg_t machine_table[MACHINE_NUM] = {
             .pos_target = 0.0f,                      /* 位移目标 m */
             .vel_max = 3.0f,                         /* 速度上限 m/s */
             .yaw_max = 5.0f,                         /* 转速上限 rad/s */
-            .len_rate = 0.4f,                        /* 腿长速率 m/s */
+            .len_rate = 0.2f,                        /* 腿长速率 m/s */
             .pos_arm_vel = 0.1f,                     /* 松杆低速门槛 */
             /* 角速度低通顺序: pitch / yaw */
             .lpf_alpha = {0.3f, 0.3f},

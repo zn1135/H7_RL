@@ -9,6 +9,7 @@
 #endif
 
 float Leg_SpringF(float L0);
+float Gas_Spring_Force(float L0);
 uint8_t Gas_Spring_Apply(const leg_state_t *left, const leg_state_t *right,
                          const float base_dm[4], float raw_dm[4]);
 

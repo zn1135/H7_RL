@@ -1,6 +1,7 @@
 #include "robot_control.h"
 #include "machine_config.h"
 #include "standup.h"
+#include "air_detection.h"
 
 #include <string.h>
 
@@ -69,6 +70,7 @@ void Robot_Control_Init(void)
     }
     torque_output_enabled = 1u;
     Standup_Init(&standup_control);
+    Air_Detection_Reset(&air_detection);
 
     Leg_Init(&leg_l);
     Leg_Init(&leg_r);

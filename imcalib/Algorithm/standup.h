@@ -24,8 +24,7 @@ enum {
 enum {
     STANDUP_POSE_NORMAL = 0,
     STANDUP_POSE_INVERTED,
-    STANDUP_POSE_SIDE,
-    STANDUP_POSE_INVALID,
+    STANDUP_POSE_INVALID = 3,
 };
 
 enum {
@@ -54,7 +53,7 @@ typedef struct {
     float recovery_stall_time;
     uint8_t recovery_retry_max;
     float retry_wait;
-    float trigger_roll;
+    float length_rate; /* 腿长m/s */
     float extend_len;
     float extend_tol;
     float extend_timeout;
@@ -70,12 +69,10 @@ typedef struct {
     float angle_speed_kd;
     float angle_speed_max;
     float tp_max;
-    float roll_ready;
     float trigger_angle;
     float trigger_pitch;
     float angle_tol;
     float pitch_max;
-    float roll_max;
     float stable_time;
     float support_time;
     float trigger_time;
@@ -112,7 +109,6 @@ typedef struct {
     float stall_elapsed;
     float stall_upright;
     float upright;
-    float side;
     float force[2];
     float tp[2];
     pid_t length_pid[2];

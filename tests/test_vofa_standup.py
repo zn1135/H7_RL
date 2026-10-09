@@ -29,6 +29,9 @@ static lqr_state_t lqr_state;
 static struct { uint8_t motor_enabled, fallen; } robot_state;
 static struct { struct { uint8_t online[4]; float trq_nm[4]; } dm; struct { uint8_t online[2]; } dji;
                 uint32_t timestamp_ms; } motor_state;
+#include "air_detection.h"
+air_param_t air_param;
+volatile air_detection_t air_debug;
 static uint32_t ctrl_fault;
 static compensation_debug_t compensation_debug;
 static float rl_output_dm_cmd_nm[4];
@@ -103,6 +106,18 @@ int main(void)
     assert(out[24]==1.25f && out[25]==2.25f && out[26]==-.5f && out[27]==.5f);
     for(i=0;i<4;i++) {assert(out[28+i]==2.f+i && out[32+i]==-3.f-i);}
     assert(out[36]==.23f && out[37]==.27f && out[38]==31);
+    air_param.vofa_page=air_param.control_enabled=1;
+    air_debug.leg[0].force=10;air_debug.leg[1].force=20;air_debug.mean_force=15;
+    air_param.force_off=20;air_param.force_on=35;air_debug.valid=air_debug.applied=air_debug.flight=1;
+    air_debug.elapsed=.01f;
+    air_debug.leg[0].motor_force=-5;air_debug.leg[1].motor_force=-6;
+    air_debug.leg[0].pressure=7;air_debug.leg[1].pressure=8;
+    air_debug.leg[0].wheel_acceleration=-9;air_debug.leg[1].wheel_acceleration=-10;
+    frame(out);assert(out[24]==10&&out[25]==20&&out[26]==15&&out[27]==1);
+    assert(out[28]==.01f&&out[29]==20&&out[30]==35&&out[31]==13);
+    assert(out[32]==-5&&out[33]==-6&&out[34]==7&&out[35]==8&&out[36]==-9&&out[37]==-10&&out[38]==1);
+    air_debug.armed=1;frame(out);assert(out[31]==29);
+
     return 0;
 }
 """

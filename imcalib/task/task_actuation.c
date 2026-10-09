@@ -8,6 +8,7 @@
 #include "gas_spring.h"
 #include "standup.h"
 #include "slip.h"
+#include "air_detection.h"
 #include <math.h>
 #include <string.h>
 
@@ -30,6 +31,9 @@ typedef struct {
     rc_command_t rc;
     rc_control_mode_t mode;
     float wheel_vel[2];
+    float joint_torque[4];
+    uint64_t joint_rx_ns[4];
+    uint8_t joint_online[4];
     uint8_t drive;
     uint8_t normal;
     uint8_t recovery;
@@ -129,6 +133,8 @@ uint8_t Robot_Control_Enable_Allowed(void)
 /* 本拍快照与许可 */
 static void Control_Frame_Read(void)
 {
+    uint8_t i;
+
     taskENTER_CRITICAL();
     control_frame.imu = imu_state;
     control_frame.left = leg_l;
@@ -137,6 +143,12 @@ static void Control_Frame_Read(void)
     control_frame.mode = Control_Mode_Decode(&control_frame.rc);
     control_frame.wheel_vel[0] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_LFT];
     control_frame.wheel_vel[1] = motor_state.dji.vel_rad_s[DJI_MOTOR_WHEEL_RGT];
+    for (i = 0u; i < 4u; i++)
+    {
+        control_frame.joint_torque[i] = motor_state.dm.trq_nm[i];
+        control_frame.joint_rx_ns[i] = motor_state.dm.parsed_rx_ns[i];
+        control_frame.joint_online[i] = (uint8_t)(motor_state.dm.online[i] && Dm_Is_Enabled(i));
+    }
     control_frame.drive = (uint8_t)(Robot_Control_Enable_Allowed()
         && robot_state.motor_enabled && torque_output_enabled);
     control_frame.normal = (uint8_t)(control_frame.drive && !robot_state.fallen);
@@ -228,6 +240,46 @@ static void output_dispatch(const torque_output_t *torque)
         // (void)Dji_All_Stop();
 }
 
+/* 离地观测与切换 */
+static void Control_Air_Update(void)
+{
+    air_input_t input;
+    uint8_t side;
+    uint8_t i;
+    uint8_t active;
+    uint8_t was_active;
+
+    memset(&input, 0, sizeof(input));
+    input.imu = &control_frame.imu;
+    input.leg[0] = &control_frame.left;
+    input.leg[1] = &control_frame.right;
+    input.now_ns = Mono_Ns_Get();
+    input.permit = (uint8_t)(lqr_running && control_frame.normal
+        && control_frame.mode.strategy == CTRL_STRATEGY_LQR && control_frame.mode.engage
+        && (!standup_control.enabled || standup_control.phase == STANDUP_DONE));
+    for (side = 0u; side < 2u; side++)
+    {
+        for (i = 0u; i < 2u; i++)
+        {
+            input.torque[side][i] = control_frame.joint_torque[side * 2u + i];
+            input.rx_ns[side][i] = control_frame.joint_online[side * 2u + i]
+                ? control_frame.joint_rx_ns[side * 2u + i] : 0u;
+        }
+    }
+    was_active = lqr_state.air_control;
+    Air_Detection_Update(&air_detection, &input);
+    active = Air_Detection_Active(&air_detection);
+    if (active != was_active)
+    {
+        lqr_state.pos = 0.0f;
+        lqr_state.pos_armed = 0u;
+        lqr_state.yaw_tgt = lqr_state.x[LQR_X_PHI];
+    }
+    lqr_state.air_control = active;
+    lqr_state.air_hip_max = air_param.hip_max;
+    air_detection.applied = active;
+}
+
 /* 组装观测、速度补偿、位置积分 */
 static void Control_State_Update(uint8_t reset_velocity)
 {
@@ -236,16 +288,20 @@ static void Control_State_Update(uint8_t reset_velocity)
         control_frame.wheel_vel, MACHINE_LQR_DT))
     {
         Slip_Reset(&slip_control);
+        Air_Detection_Reset(&air_detection);
+        lqr_state.air_control = 0u;
         return;
     }
+    Control_Air_Update();
     if (reset_velocity || !slip_control.initialized)
     {
         Slip_Init(&slip_control, lqr_state.ds_raw, lqr_state.a_fwd);
     }
     else
     {
-        (void)Slip_Update(&slip_control, lqr_state.ds_raw,
-            lqr_state.a_fwd, MACHINE_LQR_DT);
+        (void)Slip_Update_Contact(&slip_control, lqr_state.ds_raw,
+            lqr_state.a_fwd, MACHINE_LQR_DT,
+            (uint8_t)(!lqr_state.air_control || !air_detection.flight));
     }
     if (!slip_control.valid)
     {
@@ -292,6 +348,8 @@ static void lqr_idle(void)
 {
     lqr_running = 0u;
     Leg_Balance_Reset(&leg_balance);
+    Air_Detection_Reset(&air_detection);
+    lqr_state.air_control = 0u;
 }
 
 /* ================= 2 求解层: 只写 torque, 不下发 ================= */
@@ -337,7 +395,15 @@ static void solve_compensation(torque_output_t *torque)
 /* LQR 平衡: 目标 → 状态反馈 → 腿部力控 */
 static void solve_lqr(torque_output_t *torque)
 {
-    if (!LQR_Target_Update(&lqr_state, &control_frame.rc, MACHINE_LQR_DT))
+    rc_command_t command;
+
+    command = control_frame.rc;
+    if (lqr_state.air_control)
+    {
+        command.vel = 0.0f;
+        command.yaw = 0.0f;
+    }
+    if (!LQR_Target_Update(&lqr_state, &command, MACHINE_LQR_DT))
     {
         return;
     }
@@ -533,6 +599,9 @@ void output_task_body(void)
     }
 
     /* 3 分发: 唯一出口 */
+    taskENTER_CRITICAL();
+    air_debug = air_detection;
+    taskEXIT_CRITICAL();
     if (dispatch)
     {
         uint64_t queue_ns = Mono_Ns_Get();

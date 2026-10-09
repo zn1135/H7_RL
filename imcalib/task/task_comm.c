@@ -6,6 +6,7 @@
 #include "can_bus.h"
 #include "machine_config.h"
 #include "standup.h"
+#include "air_detection.h"
 #include "Vofa_send.h"
 #include "uart_idle.h"
 #include "ws2812.h"
@@ -222,6 +223,7 @@ static void Robot_Control_Send_Vofa(void)
         float command[DM_MOTOR_NUM];
         float feedback[DM_MOTOR_NUM];
         float length[2];
+        air_detection_t air;
     } snapshot;
     uint8_t motor_index;
     uint8_t compensation_bits;
@@ -271,6 +273,7 @@ static void Robot_Control_Send_Vofa(void)
     }
     snapshot.length[0] = leg_l.output.virtual_leg_length;
     snapshot.length[1] = leg_r.output.virtual_leg_length;
+    snapshot.air = air_debug;
     taskEXIT_CRITICAL();
     for (motor_index = 0u; motor_index < 2u; motor_index++)
     {
@@ -290,6 +293,26 @@ static void Robot_Control_Send_Vofa(void)
     compensation_bits |= snapshot.compensation.gravity.leg[1].clamped ? 0x08u : 0u;
     compensation_bits |= snapshot.compensation.saturated ? 0x10u : 0u;
     dbg[38] = (float)compensation_bits;
+    if (air_param.vofa_page)
+    {
+        dbg[24] = snapshot.air.leg[0].force;
+        dbg[25] = snapshot.air.leg[1].force;
+        dbg[26] = snapshot.air.mean_force;
+        dbg[27] = (float)snapshot.air.flight;
+        dbg[28] = snapshot.air.elapsed;
+        dbg[29] = air_param.force_off;
+        dbg[30] = air_param.force_on;
+        dbg[31] = (float)(snapshot.air.valid | (snapshot.air.fault << 1u)
+            | (snapshot.air.applied << 2u) | (snapshot.air.flight << 3u)
+            | (snapshot.air.armed << 4u));
+        dbg[32] = snapshot.air.leg[0].motor_force;
+        dbg[33] = snapshot.air.leg[1].motor_force;
+        dbg[34] = snapshot.air.leg[0].pressure;
+        dbg[35] = snapshot.air.leg[1].pressure;
+        dbg[36] = snapshot.air.leg[0].wheel_acceleration;
+        dbg[37] = snapshot.air.leg[1].wheel_acceleration;
+        dbg[38] = (float)air_param.control_enabled;
+    }
     (void)Vofa_Send(dbg, VOFA_MAX_CH);
 }
 

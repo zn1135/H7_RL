@@ -210,6 +210,52 @@ uint8_t Leg_Force_Map_Forward(const leg_state_t *leg, float force,
     return 1u;
 }
 
+/* 反馈力矩反解 */
+uint8_t Leg_Force_Map_Inverse(const leg_state_t *leg, const float input[2],
+                              float *force, float *torque)
+{
+    float a;
+    float b;
+    float c;
+    float d;
+    float det;
+    float scale;
+    float f;
+    float t;
+
+    if (force == NULL || torque == NULL)
+    {
+        return 0u;
+    }
+    *force = 0.0f;
+    *torque = 0.0f;
+    if (leg == NULL || input == NULL || !leg->output.valid
+        || !leg->output.force_valid || !isfinite(input[0]) || !isfinite(input[1]))
+    {
+        return 0u;
+    }
+    a = leg->output.force_map[0][0];
+    b = leg->output.force_map[0][1];
+    c = leg->output.force_map[1][0];
+    d = leg->output.force_map[1][1];
+    det = a * d - b * c;
+    scale = hypotf(a, c) * hypotf(b, d);
+    if (!isfinite(det) || !isfinite(scale) || scale <= LEG_EPS
+        || fabsf(det) < LEG_EPS || fabsf(det) / scale < 1.0e-3f)
+    {
+        return 0u;
+    }
+    f = (d * input[0] - b * input[1]) / det;
+    t = (a * input[1] - c * input[0]) / det;
+    if (!isfinite(f) || !isfinite(t))
+    {
+        return 0u;
+    }
+    *force = f;
+    *torque = t;
+    return 1u;
+}
+
 /* 初始化 */
 void Leg_Init(leg_state_t *leg)
 {
